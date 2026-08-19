@@ -102,9 +102,24 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   const [capturaTotal, setCapturaTotal] = useState(true);
   const [capturaDisponivel, setCapturaDisponivel] = useState(true);
   const [novaConexao, setNovaConexao] = useState(false);
+  /** Número que acabou de conectar e ainda não foi nomeado (prompt aberto). */
+  const [nomeando, setNomeando] = useState<string | null>(null);
+  const [nomeTmp, setNomeTmp] = useState('');
+  /** Números para os quais já perguntamos o nome — não insistir a cada troca. */
+  const jaPerguntou = useRef<Set<string>>(new Set());
 
   const session = controller.viewer;
   const outgoing = state.outgoing!;
+
+  /**
+   * Enquanto um campo de texto NOSSO está na tela, o gancho de teclado do
+   * sistema precisa ficar desligado — senão ele engole as teclas antes de
+   * chegarem ao campo, e a pessoa "não consegue digitar". Antes isso dependia
+   * de um evento de foco assíncrono, e a defasagem do IPC comia as primeiras
+   * teclas: era o "às vezes não deixa digitar". Aqui a pausa é determinística —
+   * a captura desliga junto com a abertura do modal ou do prompt de nome.
+   */
+  const pausarCaptura = novaConexao || nomeando !== null;
   /**
    * A aba da frente ainda está discando?
    *
@@ -246,11 +261,16 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     if (!session) return;
     let vivo = true;
 
-    void window.ryke.teclado.capturar(capturaTotal).then((deu) => {
+    const capturaLigada = capturaTotal && !pausarCaptura;
+    void window.ryke.teclado.capturar(capturaLigada).then((deu) => {
       if (vivo) setCapturaDisponivel(deu);
     });
 
     const parar = window.ryke.teclado.onEvento((evento) => {
+      // Se o foco está num campo NOSSO, nenhuma tecla vira comando remoto. É a
+      // segunda linha de defesa contra o gancho: mesmo que uma tecla escape na
+      // fresta de tempo até a captura desligar, ela não vaza para o outro lado.
+      if (evento.tipo !== 'soltar' && isTypingLocally(document.activeElement)) return;
       if (evento.tipo === 'soltar') {
         for (const code of pressed.current) session.sendKey(code, false);
         pressed.current.clear();
@@ -291,7 +311,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       parar();
       void window.ryke.teclado.capturar(false);
     };
-  }, [session, controller, capturaTotal, fullscreen, sairDaSessao]);
+  }, [session, controller, capturaTotal, pausarCaptura, fullscreen, sairDaSessao]);
 
   /**
    * Digitar num campo da própria interface (nome de arquivo, busca) enquanto o
@@ -299,7 +319,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
    * computador. Enquanto o foco estiver num campo daqui, a captura descansa.
    */
   useEffect(() => {
-    if (!session || !capturaTotal) return;
+    if (!session || !capturaTotal || pausarCaptura) return;
     // Sempre pelo elemento que está com o foco AGORA: no `focusout`, o alvo do
     // evento é quem está saindo, e usá-lo desligaria a captura justamente
     // quando o campo é abandonado.
@@ -315,7 +335,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       document.removeEventListener('focusin', reavaliar);
       document.removeEventListener('focusout', aoSair);
     };
-  }, [session, capturaTotal]);
+  }, [session, capturaTotal, pausarCaptura]);
 
   // ── as duas setas ──
   //
@@ -451,6 +471,27 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     return () => video.removeEventListener('wheel', onWheel);
   }, [session]);
 
+  // ── nomear a conexão assim que ela conecta ──
+  //
+  // Logo que uma conexão nova fica de pé, oferecemos guardá-la com um nome. É
+  // opcional e some com um clique; quem não quiser é só dispensar. Não insiste:
+  // uma vez perguntado (ou já salvo), o número não volta a pedir.
+  useEffect(() => {
+    const aba = state.abas.find((a) => a.peerId === state.abaAtiva);
+    if (!aba || aba.phase !== 'conectado') return;
+    if (jaPerguntou.current.has(aba.peerId)) return;
+    jaPerguntou.current.add(aba.peerId);
+    if (state.favoritos.some((f) => f.numero === aba.peerId)) return;
+    setNomeTmp('');
+    setNomeando(aba.peerId);
+  }, [state.abaAtiva, state.abas, state.favoritos]);
+
+  const salvarNome = useCallback(() => {
+    if (nomeando && nomeTmp.trim()) void controller.salvarFavorito(nomeando, nomeTmp);
+    setNomeando(null);
+    setNomeTmp('');
+  }, [controller, nomeando, nomeTmp]);
+
   // ── arrastar e soltar arquivos ──
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault();
@@ -494,6 +535,37 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
 
       {novaConexao && (
         <NovaConexao controller={controller} state={state} onClose={() => setNovaConexao(false)} />
+      )}
+
+      {nomeando && (
+        <div className="nomear-conexao" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="nomear-cartao">
+            <strong>Salvar esta conexão?</strong>
+            <span className="hint">
+              Dê um nome para reconhecê-la depois — ela aparece por ele em vez do número
+              {' '}({formatId(nomeando)}).
+            </span>
+            <input
+              className="input"
+              autoFocus
+              value={nomeTmp}
+              onChange={(e) => setNomeTmp(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') salvarNome();
+              }}
+              placeholder="Ex.: Servidor da loja"
+              maxLength={40}
+            />
+            <div className="nomear-acoes">
+              <button className="btn ghost sm" onClick={() => { setNomeando(null); setNomeTmp(''); }}>
+                Agora não
+              </button>
+              <button className="btn primary sm" disabled={!nomeTmp.trim()} onClick={salvarNome}>
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* O `key` recria o elemento a cada troca de aba: sem ele, o React

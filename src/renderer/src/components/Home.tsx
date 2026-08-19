@@ -525,29 +525,31 @@ function ConnectTo({ controller, state }: { controller: Controller; state: State
           <div className="field">
             <label>Conexões recentes</label>
             <div className="recent-list">
-              {state.recent
-                .filter((recent) => !state.favoritos.some((f) => f.numero === recent))
-                .map((recent) => (
-                  <span key={recent} className="recent-chip">
-                    <button className="recent-usar" onClick={() => setId(formatId(recent))}>
-                      {formatId(recent)}
+              {/* Recentes mostram o NOME quando o número já foi salvo — e o
+                  número quando não. Clicar preenche o número lá em cima,
+                  selecionado; a estrela guarda/renomeia, já trazendo o nome
+                  atual para editar em vez de começar do zero. */}
+              {state.recent.map((recent) => {
+                const salvo = state.favoritos.find((f) => f.numero === recent)?.nome;
+                return (
+                  <span key={recent} className={`recent-chip ${salvo ? 'nomeado' : ''}`}>
+                    <button className="recent-usar" onClick={() => setId(formatId(recent))} title={formatId(recent)}>
+                      {salvo ?? formatId(recent)}
                     </button>
-                    {/* Guardar com nome direto daqui: depois de uma sessão o
-                        número entra em "recentes", e era ali que faltava o
-                        caminho para transformá-lo em favorito. */}
                     <button
                       className="recent-estrela"
-                      title="Salvar nos favoritos com um nome"
+                      title={salvo ? 'Renomear' : 'Salvar nos favoritos com um nome'}
                       onClick={() => {
                         setId(formatId(recent));
-                        setNomeFavorito('');
+                        setNomeFavorito(salvo ?? '');
                         setSalvando(true);
                       }}
                     >
                       <IconStar width={13} height={13} />
                     </button>
                   </span>
-                ))}
+                );
+              })}
             </div>
           </div>
         )}

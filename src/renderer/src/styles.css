@@ -1174,6 +1174,52 @@ button {
   letter-spacing: 1px;
 }
 
+/* Prompt de "salvar esta conexão com um nome": flutua embaixo, sem bloquear a
+   tela remota, porque nomear é opcional e a pessoa pode querer só usar. */
+.nomear-conexao {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 40;
+}
+
+.nomear-cartao {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  padding: 18px 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.nomear-cartao strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.nomear-acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* Recente já salvo com nome: sai do monospace do número e ganha a estrela
+   acesa, para distinguir de um número solto na mesma lista. */
+.recent-chip.nomeado .recent-usar {
+  font-family: var(--sans);
+  font-weight: 600;
+}
+
+.recent-chip.nomeado .recent-estrela {
+  color: var(--warn);
+}
+
 .viewer.dragging::after {
   content: "Solte para enviar ao outro computador";
   position: absolute;
