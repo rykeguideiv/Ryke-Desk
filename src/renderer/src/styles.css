@@ -1293,6 +1293,11 @@ button {
   color: var(--warn);
 }
 
+/* Item de "conexões recebidas": é informativo, não conecta ao clicar. */
+.recent-usar.recebido {
+  cursor: default;
+}
+
 .viewer.dragging::after {
   content: "Solte para enviar ao outro computador";
   position: absolute;

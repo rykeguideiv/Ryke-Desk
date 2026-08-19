@@ -226,7 +226,82 @@ function MyComputer({
           </button>
         </div>
       )}
+
+      <ConexoesRecebidas controller={controller} state={state} />
     </section>
+  );
+}
+
+/**
+ * Quem acessou este computador recentemente.
+ *
+ * O espelho das "conexões recentes" do outro cartão: lá é para onde eu fui;
+ * aqui é quem veio até mim. Mostra o nome, quando o número já foi salvo — e
+ * dá para nomear na hora, para um número anônimo virar "Notebook da Ana" na
+ * próxima vez que aparecer.
+ */
+function ConexoesRecebidas({ controller, state }: { controller: Controller; state: State }): React.JSX.Element | null {
+  const [nomeando, setNomeando] = useState<string | null>(null);
+  const [nome, setNome] = useState('');
+
+  if (state.recebidos.length === 0) return null;
+
+  const salvar = (): void => {
+    if (nomeando && nome.trim()) void controller.salvarFavorito(nomeando, nome);
+    setNomeando(null);
+    setNome('');
+  };
+
+  return (
+    <div className="field">
+      <label>
+        Conexões recebidas
+        <span className="conta-salvos">{state.recebidos.length}</span>
+      </label>
+      <div className="recent-list">
+        {state.recebidos.map((num) => {
+          const salvo = state.favoritos.find((f) => f.numero === num)?.nome;
+          return (
+            <span key={num} className={`recent-chip ${salvo ? 'nomeado' : ''}`}>
+              {/* Informativo: não conecta de volta ao clicar (este cartão é de
+                  receber), só mostra quem foi. O número fica no title. */}
+              <span className="recent-usar recebido" title={formatId(num)}>
+                {salvo ?? formatId(num)}
+              </span>
+              <button
+                className="recent-estrela"
+                title={salvo ? 'Renomear' : 'Dar um nome a quem conectou'}
+                onClick={() => {
+                  setNomeando(num);
+                  setNome(salvo ?? '');
+                }}
+              >
+                <IconStar width={13} height={13} />
+              </button>
+            </span>
+          );
+        })}
+      </div>
+      {nomeando && (
+        <div className="input-with-action" style={{ marginTop: 8 }}>
+          <input
+            className="input"
+            autoFocus
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') salvar();
+              if (e.key === 'Escape') setNomeando(null);
+            }}
+            placeholder={`Nome para ${formatId(nomeando)}`}
+            maxLength={40}
+          />
+          <button onClick={salvar} title="Salvar">
+            <IconStar />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

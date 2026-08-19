@@ -126,6 +126,14 @@ export type State = {
   /** Arquivos atualmente copiados no Explorer deste PC. */
   clipboardFiles: string[];
   recent: string[];
+  /**
+   * Quem conectou A ESTE computador, do mais recente para o mais antigo.
+   *
+   * O espelho de `recent`: aquele guarda para quem eu fui; este, quem veio até
+   * mim. Serve para o dono da máquina saber quem a acessou — informação que
+   * antes se perdia assim que a sessão terminava.
+   */
+  recebidos: string[];
   /** Computadores guardados com nome próprio. */
   favoritos: Favorito[];
   /**
@@ -233,6 +241,7 @@ export class Controller {
     transfers: [],
     clipboardFiles: [],
     recent: [],
+    recebidos: [],
     favoritos: [],
     comSenhaSalva: [],
     toasts: [],
@@ -331,6 +340,7 @@ export class Controller {
       senhaTravada: password.travada === true,
       acceptingConnections: settings.hostOnLaunch,
       recent: loadRecent(),
+      recebidos: loadRecebidos(),
       favoritos,
       comSenhaSalva,
       booted: true,
@@ -1039,6 +1049,9 @@ export class Controller {
       // Enquanto alguém comanda esta máquina, a senha fica trancada: quem está
       // do outro lado poderia abrir este programa aqui dentro e trocá-la.
       window.ryke.session.visitantes(this.hostSessions.size);
+      // Registra quem entrou, para o dono saber depois quem o acessou.
+      rememberRecebido(peerId);
+      this.set({ recebidos: loadRecebidos() });
       this.toast('ok', `Sessão iniciada com o número ${peerId}.`);
     });
     session.on('saude', (viva, motivo) => {
@@ -1322,4 +1335,20 @@ function loadRecent(): string[] {
 function rememberRecent(peerId: string): void {
   const list = [peerId, ...loadRecent().filter((v) => v !== peerId)].slice(0, 8);
   localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+}
+
+const RECEBIDOS_KEY = 'ryke:recebidos';
+
+function loadRecebidos(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECEBIDOS_KEY) ?? '[]');
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string').slice(0, 8) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRecebido(peerId: string): void {
+  const list = [peerId, ...loadRecebidos().filter((v) => v !== peerId)].slice(0, 8);
+  localStorage.setItem(RECEBIDOS_KEY, JSON.stringify(list));
 }
