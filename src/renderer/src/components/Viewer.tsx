@@ -390,13 +390,24 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     if (point && session) session.sendMouseMove(point.x, point.y);
   }, [session]);
 
+  /**
+   * Revela a barra de menu ao encostar no topo — no CONTAINER, não no vídeo.
+   *
+   * Com duas ou mais abas, a barra de abas cobre a faixa do topo (é ela que
+   * fica ali). Se a detecção morasse no vídeo, encostar no topo cairia sobre a
+   * barra de abas, o vídeo nunca veria o movimento e a barra de menu não abriria
+   * — o que dava a impressão de que ela só funcionava na primeira aba. No
+   * container o evento chega por bubbling venha de onde vier: vídeo, barra de
+   * abas ou a própria barra de menu. A regra em si vive em lib/barra.ts.
+   */
+  const revelarBarra = useCallback((e: React.PointerEvent): void => {
+    setToolbarVisible((aberta) => decidirBarra(aberta, e.clientY, e.screenY));
+  }, []);
+
   const onPointerMove = (e: React.PointerEvent<HTMLVideoElement>): void => {
     const video = videoRef.current;
     if (!video || !session) return;
     const point = pointerToFraction(video, e.clientX, e.clientY);
-
-    // A regra e o porquê dela vivem em lib/barra.ts, onde podem ser provados.
-    setToolbarVisible((aberta) => decidirBarra(aberta, e.clientY, e.screenY));
 
     if (!point) return;
     lastPoint.current = point;
@@ -455,7 +466,10 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   return (
     <div
       ref={containerRef}
-      className={`viewer ${dragging ? 'dragging' : ''} ${outgoing.instavel ? 'instavel' : ''}`}
+      className={`viewer ${dragging ? 'dragging' : ''} ${outgoing.instavel ? 'instavel' : ''} ${
+        state.abas.length > 1 ? 'tem-abas' : ''
+      }`}
+      onPointerMove={revelarBarra}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);

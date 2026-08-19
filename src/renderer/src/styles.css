@@ -1217,6 +1217,17 @@ button {
   pointer-events: none;
 }
 
+/* Com duas ou mais abas, a barra de abas ocupa o topo. A barra de menu desce
+   para baixo dela, para as duas não brigarem pelo mesmo espaço. O deslocamento
+   maior no estado escondido garante que ela suma inteira mesmo já mais baixa. */
+.viewer.tem-abas .toolbar {
+  margin-top: 46px;
+}
+
+.viewer.tem-abas .toolbar.hidden {
+  transform: translateX(-50%) translateY(-260%);
+}
+
 .toolbar .grip {
   width: 16px;
   display: grid;
