@@ -112,15 +112,15 @@ console.log('\n── o que precisa continuar acontecendo aqui ──\n');
   check('Ctrl+Alt+Shift+F alterna a tela cheia local',
     f.eventos.some((e) => e.tipo === 'acao' && e.qual === 'telaCheia'));
 
-  // A saída do Modo Gamer (Shift+G) é tratada na interface, não no gancho,
+  // A saída do Modo Gamer (Ctrl+G) é tratada na interface, não no gancho,
   // porque depende de o modo estar ligado. Aqui só garantimos que o gancho NÃO
-  // sequestra Shift+G — senão "G maiúsculo" pararia de funcionar no remoto.
+  // sequestra Ctrl+G — senão ele pararia de funcionar no computador remoto.
   const g = new Set();
-  apertar(g, 'ShiftLeft');
-  const shiftG = apertar(g, 'KeyG');
-  check('Shift+G não vira ação local no gancho — segue como tecla normal',
-    !shiftG.eventos.some((e) => e.tipo === 'acao') && teclasDe(shiftG).join('') === 'KeyG↓',
-    teclasDe(shiftG).join(''));
+  apertar(g, 'ControlLeft');
+  const ctrlG = apertar(g, 'KeyG');
+  check('Ctrl+G não vira ação local no gancho — segue como tecla normal',
+    !ctrlG.eventos.some((e) => e.tipo === 'acao') && teclasDe(ctrlG).join('') === 'KeyG↓',
+    teclasDe(ctrlG).join(''));
 }
 
 console.log('\n── Modo Gamer: o Esc deixa de minimizar ──\n');
