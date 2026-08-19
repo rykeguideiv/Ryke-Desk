@@ -699,8 +699,17 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       {gamer && !travado && !conectandoNestaAba && (
         <div className="gamer-aviso" onPointerDown={() => videoRef.current?.requestPointerLock?.()}>
           <strong>Modo Gamer ligado</strong>
-          <span>Clique na tela para jogar — a mira gira 360°.</span>
-          <span className="gamer-saida">Ctrl+Alt+Shift+G sai do modo · Esc {escMinimiza ? 'minimiza' : 'vai para o jogo'}</span>
+          <span>Clique na tela para jogar — a mira gira 360°. O cursor fica preso e some.</span>
+          <span className="gamer-saida">Para sair a qualquer momento: Ctrl+Alt+Shift+G · Esc {escMinimiza ? 'minimiza' : 'vai para o jogo'}</span>
+        </div>
+      )}
+
+      {/* Lembrete permanente enquanto o ponteiro está preso: com o cursor
+          sumido, este é o único jeito de saber como sair sem decorar o atalho.
+          Discreto, num canto, para não atrapalhar o jogo. */}
+      {gamer && travado && (
+        <div className="gamer-preso">
+          🎮 Modo Gamer — <b>Ctrl+Alt+Shift+G</b> para sair
         </div>
       )}
 
@@ -999,8 +1008,8 @@ function Toolbar({
         onClick={onToggleGamer}
         data-dica={
           gamer
-            ? 'Modo Gamer ligado: o mouse gira a mira 360° sem travar na borda. Clique na tela para prender o ponteiro; Ctrl+Alt+Shift+G sai. Jogos com anticheat podem recusar o controle.'
-            : 'Liga o controle de jogo: o mouse passa a virar o personagem 360°, sem parar na borda da tela. É o que faz jogos de tiro funcionarem pelo acesso remoto.'
+            ? 'Modo Gamer ligado: o mouse gira a mira 360° sem travar na borda. Clique na tela para prender o ponteiro; o cursor SOME enquanto joga. Para sair, aperte Ctrl+Alt+Shift+G (o cursor não alcança este botão com o ponteiro preso). Jogos com anticheat podem recusar o controle.'
+            : 'Liga o controle de jogo: o mouse vira o personagem 360°, sem parar na borda. ATENÇÃO: o cursor fica PRESO à tela e some — para desligar não dá para clicar aqui, use o atalho Ctrl+Alt+Shift+G. É o que faz jogos de tiro funcionarem pelo acesso remoto.'
         }
       >
         <IconGamepad />
