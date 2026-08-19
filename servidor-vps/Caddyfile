@@ -1,0 +1,5 @@
+# O Caddy cuida do certificado TLS sozinho (Let's Encrypt) e repassa o
+# WebSocket para o servidor Ryke. É o que faz o endereço wss:// funcionar.
+{$RYKE_DOMINIO} {
+	reverse_proxy ryke:8787
+}

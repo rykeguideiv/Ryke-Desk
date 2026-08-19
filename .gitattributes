@@ -1,0 +1,13 @@
+# Normaliza quebras de linha: no repositório, tudo LF. Cada checkout ajusta
+# para o que o sistema operacional local espera, sem sujar o histórico.
+* text=auto eol=lf
+
+# Scripts do Windows precisam de CRLF para o PowerShell não reclamar.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binários: o Git não deve tentar converter nada.
+*.png binary
+*.ico binary
+*.exe binary

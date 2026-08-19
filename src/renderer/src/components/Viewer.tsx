@@ -1,0 +1,973 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatId, formatBytes } from '../../../shared/protocol';
+import { COMBOS } from '../../../shared/keymap';
+import { pointerToFraction, wheelToTicks, type Fraction } from '../lib/geometry';
+import { decidirBarra } from '../lib/barra';
+import type { Controller, Outgoing, State } from '../lib/controller';
+import type { Quality } from '../lib/session';
+import type { TransferView } from '../lib/files';
+import {
+  IconMonitor, IconKeyboard, IconFiles, IconFullscreen, IconExitFullscreen,
+  IconPower, IconGrip, IconX, IconArrowUp, IconArrowDown, IconFolder, IconLock, IconSend,
+  IconMinus, IconShield, IconPlus,
+} from './icons';
+import { NovaConexao } from './Modals';
+
+/**
+ * A tela do outro computador, em tamanho real.
+ *
+ * Todo evento de mouse vira uma fração da imagem (0..1) antes de ir para a
+ * rede, e todo evento de teclado vira o `code` da tecla física. Nada de
+ * pixels nem de caracteres: é o que faz a sessão continuar correta quando a
+ * janela muda de tamanho ou quando os dois lados usam layouts diferentes.
+ */
+
+const ATALHOS_LOCAIS = {
+  sair: (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyX',
+  telaCheia: (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyF',
+};
+
+/** Versão curta das etapas de conexão, para caber dentro de uma aba. */
+const TEXTO_FASE: Record<Outgoing['phase'], string> = {
+  discando: 'Procurando o computador…',
+  autenticando: 'Conferindo a senha…',
+  'aguardando-autorizacao': 'Aguardando alguém permitir do outro lado…',
+  negociando: 'Abrindo o caminho direto…',
+  conectado: 'Conectado',
+};
+
+/**
+ * As abas, uma por computador conectado.
+ *
+ * Cada aba é uma sessão inteira e independente: conexão própria, taxa de bits
+ * própria, qualidade própria. Trocar de aba não desconecta nada — só muda qual
+ * delas recebe o teclado e o mouse e aparece na tela. É por isso que dá para
+ * deixar um computador copiando arquivos numa aba enquanto se trabalha noutra.
+ */
+function BarraDeAbas({
+  abas,
+  ativa,
+  onEscolher,
+  onFechar,
+  onNova,
+}: {
+  abas: Outgoing[];
+  ativa: string | null;
+  onEscolher: (peerId: string) => void;
+  onFechar: (peerId: string) => void;
+  onNova: () => void;
+}): React.JSX.Element {
+  return (
+    <div className="barra-abas" onPointerDown={(e) => e.stopPropagation()}>
+      {abas.map((aba) => (
+        <div key={aba.peerId} className={`aba ${aba.peerId === ativa ? 'ativa' : ''}`}>
+          <button className="aba-abrir" onClick={() => onEscolher(aba.peerId)} title={formatId(aba.peerId)}>
+            <span
+              className={`aba-ponto ${
+                aba.phase !== 'conectado' ? 'ligando' : aba.instavel ? 'instavel' : 'on'
+              }`}
+            />
+            {/* O nome da máquina quando ele já chegou; o número enquanto não.
+                Doze dígitos não distinguem nada numa fileira de abas. */}
+            <span className="aba-nome">{aba.meta?.hostName ?? formatId(aba.peerId)}</span>
+          </button>
+          <button className="aba-fechar" title="Encerrar esta conexão" onClick={() => onFechar(aba.peerId)}>
+            <IconX width={12} height={12} />
+          </button>
+        </div>
+      ))}
+      <button className="aba-nova" title="Conectar a mais um computador" onClick={onNova}>
+        <IconPlus width={14} height={14} />
+      </button>
+    </div>
+  );
+}
+
+
+export function Viewer({ controller, state }: { controller: Controller; state: State }): React.JSX.Element {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [showDrawer, setShowDrawer] = useState(false);
+  const [toolbarVisible, setToolbarVisible] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  /**
+   * Captura total do teclado.
+   *
+   * Ligada por padrão, porque é o que a pessoa espera ao controlar outro
+   * computador: apertar Ctrl+Shift+Esc tem de abrir o Gerenciador de Tarefas
+   * DE LÁ. Desligável porque, com ela ligada, este computador fica sem
+   * atalhos enquanto a janela estiver na frente.
+   */
+  const [capturaTotal, setCapturaTotal] = useState(true);
+  const [capturaDisponivel, setCapturaDisponivel] = useState(true);
+  const [novaConexao, setNovaConexao] = useState(false);
+
+  const session = controller.viewer;
+  const outgoing = state.outgoing!;
+  /**
+   * A aba da frente ainda está discando?
+   *
+   * Acontece ao abrir uma segunda conexão sem largar a primeira: a aba nova
+   * nasce na frente e passa alguns segundos negociando. Nesse intervalo não
+   * há vídeo para mostrar, mas as outras abas seguem conectadas atrás — então
+   * a janela continua sendo o visualizador, e quem espera é só esta aba.
+   */
+  const conectandoNestaAba = outgoing.phase !== 'conectado';
+
+
+  // ── vídeo ──
+  //
+  // O elemento é recriado a cada troca de aba (o `key` no JSX), então reatar o
+  // fluxo guardado na sessão é o que faz a imagem voltar na hora ao alternar.
+  // A conexão em si nunca é desfeita: ela vive na sessão, não neste elemento.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !session) return;
+    if (session.remoteStream) video.srcObject = session.remoteStream;
+    return session.on('stream', (stream) => {
+      video.srcObject = stream;
+    });
+  }, [session]);
+
+  // ── teclado ──
+  //
+  // Capturamos na fase de captura da janela e cancelamos o evento: sem isso o
+  // Chromium trataria Ctrl+W, Ctrl+R e F5 como atalhos desta janela em vez de
+  // repassá-los ao computador remoto.
+  const pressed = useRef(new Set<string>());
+
+  /**
+   * Esc: sai da frente sem encerrar a sessão.
+   *
+   * Tira da tela cheia, se estiver, e minimiza a janela — a conexão continua
+   * de pé, esperando na barra de tarefas. É o reflexo de todo mundo: em cima
+   * da tela de outro computador, Esc é "me tira daqui".
+   *
+   * O preço é que Esc deixa de atravessar. Para mandá-lo de propósito ao outro
+   * computador existe o botão **Esc** no menu *Teclas* da barra.
+   */
+  const sairDaSessao = useCallback(() => {
+    if (!session) return;
+    // Solta o que estiver pressionado antes de sumir: com a janela minimizada
+    // o "levantar" da tecla nunca chegaria, e o outro computador ficaria com
+    // um Ctrl ou um Alt preso para sempre.
+    for (const code of pressed.current) session.sendKey(code, false);
+    pressed.current.clear();
+    if (fullscreen) {
+      setFullscreen(false);
+      window.ryke.window.fullscreen(false);
+    }
+    window.ryke.window.minimize();
+  }, [session, fullscreen]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    const soltarTudo = (): void => {
+      for (const code of pressed.current) session.sendKey(code, false);
+      pressed.current.clear();
+    };
+
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        sairDaSessao();
+        return;
+      }
+      // Deixa passar o que é digitado num campo da nossa própria interface.
+      if (isTypingLocally(e.target)) return;
+
+      // Para arquivo, Ctrl+V precisa esperar os bytes chegarem e o clipboard
+      // remoto oferecer CF_HDROP. Depois executa a combinação no Explorer.
+      if (e.code === 'KeyV' && temControle(pressed.current)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        for (const code of pressed.current) session.sendKey(code, false);
+        pressed.current.clear();
+        void controller.prepararColagemDeArquivo().then(() => {
+          session.sendCombo(['ControlLeft', 'KeyV']);
+        });
+        return;
+      }
+
+      if (ATALHOS_LOCAIS.sair(e)) {
+        e.preventDefault();
+        soltarTudo();
+        controller.disconnect();
+        return;
+      }
+      if (ATALHOS_LOCAIS.telaCheia(e)) {
+        e.preventDefault();
+        setFullscreen((on) => {
+          window.ryke.window.fullscreen(!on);
+          return !on;
+        });
+        return;
+      }
+
+      e.preventDefault();
+      pressed.current.add(e.code);
+      session.sendKey(e.code, true, e.repeat);
+    };
+
+    const onKeyUp = (e: KeyboardEvent): void => {
+      if (isTypingLocally(e.target)) return;
+      e.preventDefault();
+      // Nunca soltar do outro lado uma tecla que nunca foi pressionada lá.
+      // É o que acontece com o Esc que saiu da tela cheia: o "desce" ficou
+      // aqui, e só o "sobe" chegaria — deixando o Windows remoto confuso.
+      if (!pressed.current.delete(e.code)) return;
+      session.sendKey(e.code, false);
+    };
+
+    // Alt+Tab é tratado pelo Windows antes de chegar até nós: quando a janela
+    // perde o foco, o "keyup" nunca chega e a tecla ficaria presa lá.
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', soltarTudo);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', soltarTudo);
+      soltarTudo();
+    };
+  }, [session, controller, fullscreen, sairDaSessao]);
+
+  // ── teclado, o resto dele ──
+  //
+  // O trecho acima só pega o que o navegador enxerga, e o Windows come as
+  // combinações mais úteis antes disso: Ctrl+Shift+Esc, Ctrl+Esc, a tecla
+  // Windows, Alt+Tab. Elas chegam por aqui, de um gancho instalado no processo
+  // principal, e seguem o mesmo caminho de sempre a partir do `code`.
+  useEffect(() => {
+    if (!session) return;
+    let vivo = true;
+
+    void window.ryke.teclado.capturar(capturaTotal).then((deu) => {
+      if (vivo) setCapturaDisponivel(deu);
+    });
+
+    const parar = window.ryke.teclado.onEvento((evento) => {
+      if (evento.tipo === 'soltar') {
+        for (const code of pressed.current) session.sendKey(code, false);
+        pressed.current.clear();
+        return;
+      }
+      if (evento.tipo === 'acao') {
+        if (evento.qual === 'sair') controller.disconnect();
+        if (evento.qual === 'minimizar') sairDaSessao();
+        if (evento.qual === 'telaCheia') {
+          setFullscreen((on) => {
+            window.ryke.window.fullscreen(!on);
+            return !on;
+          });
+        }
+        return;
+      }
+      if (evento.pressionada && evento.code === 'KeyV' && temControle(pressed.current)) {
+        for (const code of pressed.current) session.sendKey(code, false);
+        pressed.current.clear();
+        void controller.prepararColagemDeArquivo().then(() => session.sendCombo(['ControlLeft', 'KeyV']));
+        return;
+      }
+      // Mesmo trato do teclado comum. Com a captura total ligada esta é a
+      // única chance de tratar o Esc — o gancho engole a tecla antes de a
+      // janela vê-la.
+      if (evento.code === 'Escape') {
+        if (evento.pressionada) sairDaSessao();
+        return;
+      }
+
+      if (evento.pressionada) pressed.current.add(evento.code);
+      else pressed.current.delete(evento.code);
+      session.sendKey(evento.code, evento.pressionada);
+    });
+
+    return () => {
+      vivo = false;
+      parar();
+      void window.ryke.teclado.capturar(false);
+    };
+  }, [session, controller, capturaTotal, fullscreen, sairDaSessao]);
+
+  /**
+   * Digitar num campo da própria interface (nome de arquivo, busca) enquanto o
+   * teclado está todo capturado seria impossível: cada tecla iria para o outro
+   * computador. Enquanto o foco estiver num campo daqui, a captura descansa.
+   */
+  useEffect(() => {
+    if (!session || !capturaTotal) return;
+    // Sempre pelo elemento que está com o foco AGORA: no `focusout`, o alvo do
+    // evento é quem está saindo, e usá-lo desligaria a captura justamente
+    // quando o campo é abandonado.
+    const reavaliar = (): void => {
+      void window.ryke.teclado.capturar(!isTypingLocally(document.activeElement));
+    };
+    const aoSair = (): void => {
+      window.setTimeout(reavaliar, 0);
+    };
+    document.addEventListener('focusin', reavaliar);
+    document.addEventListener('focusout', aoSair);
+    return () => {
+      document.removeEventListener('focusin', reavaliar);
+      document.removeEventListener('focusout', aoSair);
+    };
+  }, [session, capturaTotal]);
+
+  // ── as duas setas ──
+  //
+  // A SUA é o cursor do próprio Windows desta máquina, pintado de vermelho por
+  // um cursor personalizado no CSS. Continua instantâneo — quem o desenha é o
+  // sistema, não a página — e a cor é o que deixa claro, à primeira vista,
+  // qual das duas obedece à sua mão.
+  //
+  // A DELES é esta marca: a posição real do ponteiro de lá, que o anfitrião
+  // informa pelo canal rápido, no desenho claro e padrão. A seta que vem
+  // dentro do vídeo não serve para nada disso, porque chega com o atraso da
+  // imagem.
+  //
+  // As duas andam de forma independente, mas há um detalhe físico que a
+  // interface precisa respeitar: o computador remoto tem UM ponteiro só, e
+  // enquanto você o dirige a posição que volta de lá é a sua própria. Nesse
+  // caso mostramos apenas a sua. A marca deles reaparece assim que as duas
+  // posições se descolam — o instante exato em que a pessoa que está lá pegou
+  // o mouse dela e passou a mexer por conta própria.
+  const marcaRef = useRef<HTMLDivElement>(null);
+  const cursorRemoto = useRef<Fraction>({ x: 0.5, y: 0.5 });
+  /** Último ponto que ESTA máquina mandou — a régua para saber quem mexeu. */
+  const lastPoint = useRef<Fraction>({ x: 0.5, y: 0.5 });
+
+  const posicionarMarca = useCallback(() => {
+    const marca = marcaRef.current;
+    const video = videoRef.current;
+    const palco = containerRef.current;
+    if (!marca || !video || !palco) return;
+    const r = video.getBoundingClientRect();
+    const { videoWidth, videoHeight } = video;
+    if (!videoWidth || !videoHeight || r.width === 0) return;
+    const escala = Math.min(r.width / videoWidth, r.height / videoHeight);
+    const largura = videoWidth * escala;
+    const altura = videoHeight * escala;
+    const esquerda = r.left + (r.width - largura) / 2;
+    const topo = r.top + (r.height - altura) / 2;
+    const p = palco.getBoundingClientRect();
+    const x = esquerda + cursorRemoto.current.x * largura - p.left;
+    const y = topo + cursorRemoto.current.y * altura - p.top;
+    marca.style.transform = `translate(${x}px, ${y}px)`;
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    const solta = session.on('cursor', (ponto) => {
+      cursorRemoto.current = ponto;
+      // Perto o bastante do último ponto que ESTA máquina mandou significa que
+      // o ponteiro de lá está apenas obedecendo a você. A folga é generosa de
+      // propósito: o anfitrião arredonda a fração em quatro casas e o Windows
+      // encaixa o ponteiro no pixel, então "o mesmo lugar" nunca bate exato.
+      const meu = lastPoint.current;
+      const juntos = Math.abs(ponto.x - meu.x) < 0.012 && Math.abs(ponto.y - meu.y) < 0.012;
+      marcaRef.current?.classList.toggle('propria', juntos);
+      posicionarMarca();
+    });
+    window.addEventListener('resize', posicionarMarca);
+    return () => {
+      solta();
+      window.removeEventListener('resize', posicionarMarca);
+    };
+  }, [session, posicionarMarca]);
+
+  // ── mouse ──
+  const pendingMove = useRef<Fraction | null>(null);
+  const rafId = useRef<number | null>(null);
+
+  const flushMove = useCallback(() => {
+    rafId.current = null;
+    const point = pendingMove.current;
+    pendingMove.current = null;
+    if (point && session) session.sendMouseMove(point.x, point.y);
+  }, [session]);
+
+  const onPointerMove = (e: React.PointerEvent<HTMLVideoElement>): void => {
+    const video = videoRef.current;
+    if (!video || !session) return;
+    const point = pointerToFraction(video, e.clientX, e.clientY);
+
+    // A regra e o porquê dela vivem em lib/barra.ts, onde podem ser provados.
+    setToolbarVisible((aberta) => decidirBarra(aberta, e.clientY, e.screenY));
+
+    if (!point) return;
+    lastPoint.current = point;
+    // Um pacote por quadro: a 60 Hz o mouse já parece instantâneo, e mandar
+    // um por evento entupiria o canal de controle.
+    pendingMove.current = point;
+    if (rafId.current === null) rafId.current = requestAnimationFrame(flushMove);
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLVideoElement>): void => {
+    const video = videoRef.current;
+    if (!video || !session || e.button > 2) return;
+    // Captura o ponteiro para que arrastar até fora do vídeo continue valendo
+    // (selecionar texto, mover janela remota até a borda).
+    video.setPointerCapture(e.pointerId);
+    const point = pointerToFraction(video, e.clientX, e.clientY) ?? lastPoint.current;
+    lastPoint.current = point;
+    session.sendMouseButton(e.button as 0 | 1 | 2, true, point.x, point.y);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLVideoElement>): void => {
+    const video = videoRef.current;
+    if (!video || !session || e.button > 2) return;
+    if (video.hasPointerCapture(e.pointerId)) video.releasePointerCapture(e.pointerId);
+    const point = pointerToFraction(video, e.clientX, e.clientY) ?? lastPoint.current;
+    session.sendMouseButton(e.button as 0 | 1 | 2, false, point.x, point.y);
+  };
+
+  // A roda precisa de listener não-passivo para podermos cancelar o zoom
+  // padrão do Chromium com Ctrl+roda.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !session) return;
+    const onWheel = (e: WheelEvent): void => {
+      e.preventDefault();
+      const { dx, dy } = wheelToTicks(e);
+      const point = pointerToFraction(video, e.clientX, e.clientY) ?? lastPoint.current;
+      session.sendWheel(dx, dy, point.x, point.y);
+    };
+    video.addEventListener('wheel', onWheel, { passive: false });
+    return () => video.removeEventListener('wheel', onWheel);
+  }, [session]);
+
+  // ── arrastar e soltar arquivos ──
+  const onDrop = (e: React.DragEvent): void => {
+    e.preventDefault();
+    setDragging(false);
+    if (e.dataTransfer.files.length > 0) {
+      controller.sendDroppedFiles(e.dataTransfer.files);
+      setShowDrawer(true);
+    }
+  };
+
+  const emAndamento = state.transfers.filter((t) => t.state === 'ativo' || t.state === 'aguardando').length;
+
+  return (
+    <div
+      ref={containerRef}
+      className={`viewer ${dragging ? 'dragging' : ''} ${outgoing.instavel ? 'instavel' : ''}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragging(false);
+      }}
+      onDrop={onDrop}
+    >
+      {/* A barra de abas só aparece quando há mais de uma conexão. Com uma
+          só, ela seria uma faixa ocupando altura da tela remota para não
+          informar nada — e altura é exatamente o que falta aqui. */}
+      {state.abas.length > 1 && (
+        <BarraDeAbas
+          abas={state.abas}
+          ativa={state.abaAtiva}
+          onEscolher={(peerId) => controller.selecionarAba(peerId)}
+          onFechar={(peerId) => controller.disconnect(peerId)}
+          onNova={() => setNovaConexao(true)}
+        />
+      )}
+
+      {novaConexao && (
+        <NovaConexao controller={controller} state={state} onClose={() => setNovaConexao(false)} />
+      )}
+
+      {/* O `key` recria o elemento a cada troca de aba: sem ele, o React
+          reaproveitaria o mesmo <video> e o fluxo anterior continuaria
+          pintado até o novo chegar, mostrando por um instante a tela do
+          computador errado. */}
+      <video
+        key={outgoing.peerId}
+        ref={videoRef}
+        className={conectandoNestaAba ? 'apagado' : ''}
+        autoPlay
+        playsInline
+        muted={false}
+        onPointerMove={onPointerMove}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+        onContextMenu={(e) => e.preventDefault()}
+        onDragStart={(e) => e.preventDefault()}
+        onLoadedMetadata={posicionarMarca}
+      />
+
+      {/* Discagem da aba nova, por dentro do visualizador. A tela cheia de
+          "conectando" só faz sentido na primeira conexão, quando não há nada
+          atrás; aqui atrás existem sessões em uso. */}
+      {conectandoNestaAba && (
+        <div className="aba-discando">
+          <div className="aba-discando-cartao">
+            <span className="spinner" />
+            <strong>{formatId(outgoing.peerId)}</strong>
+            <span>{TEXTO_FASE[outgoing.phase]}</span>
+            <button className="btn ghost sm" onClick={() => controller.disconnect(outgoing.peerId)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* A seta do outro computador, no desenho claro e padrão — a vermelha é
+          a sua, e vem do cursor do sistema (ver styles.css). Nasce escondida:
+          só aparece quando a posição de lá se descola da que você comanda, ou
+          seja, quando a pessoa que está lá pega o mouse dela. */}
+      <div className="seta-remota propria" ref={marcaRef} aria-hidden="true">
+        <svg width="16" height="23" viewBox="0 0 16 23">
+          <path
+            d="M1.6 1.2 L1.6 17 L5.4 13.4 L8 19.9 L10.7 18.8 L8.1 12.5 L13.2 12.5 Z"
+            fill="#f2f6ff"
+            stroke="#1b2438"
+            strokeWidth="1.3"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <span>{outgoing.meta?.hostName ?? 'computador remoto'}</span>
+      </div>
+
+      <Toolbar
+        controller={controller}
+        state={state}
+        visible={toolbarVisible}
+        fullscreen={fullscreen}
+        pendingTransfers={emAndamento}
+        onToggleFullscreen={() => {
+          const next = !fullscreen;
+          setFullscreen(next);
+          window.ryke.window.fullscreen(next);
+        }}
+        onMinimize={sairDaSessao}
+        onToggleDrawer={() => setShowDrawer((v) => !v)}
+        onNovaConexao={() => setNovaConexao(true)}
+        capturaTotal={capturaTotal}
+        capturaDisponivel={capturaDisponivel}
+        onToggleCaptura={() => setCapturaTotal((v) => !v)}
+      />
+
+      {showDrawer && (
+        <TransferDrawer controller={controller} transfers={state.transfers} onClose={() => setShowDrawer(false)} />
+      )}
+
+      {outgoing.stats === null && (
+        <div style={{ position: 'absolute', bottom: 16, left: 16, fontSize: 12, color: 'var(--text-faint)' }}>
+          Recebendo a imagem de {formatId(outgoing.peerId)}…
+        </div>
+      )}
+    </div>
+  );
+}
+
+function temControle(pressionadas: Set<string>): boolean {
+  return pressionadas.has('ControlLeft') || pressionadas.has('ControlRight');
+}
+
+/** Campos da própria interface do Ryke Desk não devem virar tecla remota. */
+function isTypingLocally(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
+}
+
+// ─────────────────────── barra de ferramentas ─────────────────────
+
+function Toolbar({
+  controller,
+  state,
+  visible,
+  fullscreen,
+  pendingTransfers,
+  onToggleFullscreen,
+  onMinimize,
+  onToggleDrawer,
+  onNovaConexao,
+  capturaTotal,
+  capturaDisponivel,
+  onToggleCaptura,
+}: {
+  controller: Controller;
+  state: State;
+  visible: boolean;
+  fullscreen: boolean;
+  pendingTransfers: number;
+  onToggleFullscreen: () => void;
+  onMinimize: () => void;
+  onToggleDrawer: () => void;
+  onNovaConexao: () => void;
+  capturaTotal: boolean;
+  capturaDisponivel: boolean;
+  onToggleCaptura: () => void;
+}): React.JSX.Element {
+  const [menu, setMenu] = useState<'monitor' | 'teclas' | 'qualidade' | null>(null);
+  const outgoing = state.outgoing!;
+  const stats = outgoing.stats;
+  const displays = outgoing.meta?.displays ?? [];
+
+  const toggle = (name: typeof menu) => () => setMenu((atual) => (atual === name ? null : name));
+
+  return (
+    <div className={`toolbar ${visible || menu ? '' : 'hidden'}`} onPointerDown={(e) => e.stopPropagation()}>
+      <span className="grip">
+        <IconGrip />
+      </span>
+
+      <span className="tool" style={{ cursor: 'default' }}>
+        {outgoing.meta?.hostName ?? formatId(outgoing.peerId)}
+      </span>
+
+      {/* Com uma aba só, a barra de abas fica escondida — e este vira o único
+          caminho para abrir a segunda. Sem ele, o recurso existiria mas
+          ninguém chegaria nele partindo de uma conexão em andamento. */}
+      <button className="tool" onClick={onNovaConexao} data-dica="Conecta a mais um computador numa nova aba, sem encerrar esta.">
+        <IconPlus />
+        Nova aba
+      </button>
+
+      <span className="tool-sep" />
+
+      <div className="tool-menu">
+        <button className={`tool ${menu === 'monitor' ? 'on' : ''}`} onClick={toggle('monitor')}>
+          <IconMonitor />
+          Telas
+        </button>
+        {menu === 'monitor' && (
+          <div className="menu">
+            <div className="menu-label">Tela exibida</div>
+            {displays.length === 0 && <div className="menu-item">Atualizando telas…</div>}
+            {displays.map((display) => (
+              <button
+                key={display.id}
+                className={`menu-item ${display.id === outgoing.meta?.activeDisplay ? 'active' : ''}`}
+                onClick={() => {
+                  controller.selectDisplay(display.id);
+                  setMenu(null);
+                }}
+              >
+                {display.label}
+                {display.primary && <small>principal</small>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="tool-menu">
+        <button className={`tool ${menu === 'teclas' ? 'on' : ''}`} onClick={toggle('teclas')}>
+          <IconKeyboard />
+          Teclas
+        </button>
+        {menu === 'teclas' && (
+          <div className="menu">
+            <div className="menu-label">Enviar combinação</div>
+            {COMBOS.map((combo) => (
+              <button
+                key={combo.label}
+                className="menu-item"
+                onClick={() => {
+                  controller.sendCombo(combo.codes);
+                  setMenu(null);
+                }}
+              >
+                {combo.label}
+                <small>{combo.hint}</small>
+              </button>
+            ))}
+            <div className="menu-label">Atalhos desta janela</div>
+            <div className="menu-item" style={{ pointerEvents: 'none' }}>
+              Ctrl+Alt+Shift+X <small>encerrar</small>
+            </div>
+            <div className="menu-item" style={{ pointerEvents: 'none' }}>
+              Ctrl+Alt+Shift+F <small>tela cheia</small>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="tool-menu">
+        <button className={`tool ${menu === 'qualidade' ? 'on' : ''}`} onClick={toggle('qualidade')}>
+          <IconMonitor />
+          Imagem
+        </button>
+        {menu === 'qualidade' && (
+          <div className="menu">
+            <div className="menu-label">Qualidade da imagem</div>
+            {(
+              [
+                ['auto', 'Automática', 'Mede a rede e ajusta sozinha — recomendado'],
+                ['alta', 'Alta', 'O máximo que a rede e a máquina derem'],
+                ['media', 'Média', 'Meio-termo fixo, sem ajuste automático'],
+                ['baixa', 'Baixa', 'Para internet fraca: leve e sem travar'],
+              ] as [Quality, string, string][]
+            ).map(([valor, titulo, descricao]) => (
+              <button
+                key={valor}
+                className={`menu-item ${outgoing.quality === valor ? 'active' : ''}`}
+                onClick={() => {
+                  controller.setQuality(valor);
+                  setMenu(null);
+                }}
+              >
+                {titulo}
+                <small>{descricao}</small>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <button
+        className="tool"
+        onClick={() => controller.sendCombo(['ControlLeft', 'AltLeft', 'Delete'])}
+        data-dica="Manda Ctrl+Alt+Del para o computador remoto. A tecla física do seu teclado nunca chega lá — o Windows reserva essa combinação para o computador em uso, por isso ela precisa vir daqui."
+      >
+        <IconShield />
+        Ctrl+Alt+Del
+      </button>
+
+      <button className={`tool ${pendingTransfers > 0 ? 'on' : ''}`} onClick={onToggleDrawer}>
+        <IconFiles />
+        Arquivos
+        {pendingTransfers > 0 && <span className="badge">{pendingTransfers}</span>}
+      </button>
+
+      <button
+        className="tool"
+        onClick={() => controller.runRemoteInstaller()}
+        data-dica="Escolhe um arquivo .exe ou .msi no computador remoto e o inicia como administrador, sem a conexão parar na tela protegida do UAC."
+      >
+        <IconShield />
+        Instalar
+      </button>
+
+      {/* Ícone sozinho não explica nada: as duas chaves abaixo mexem em coisas
+          sérias — uma tranca o teclado de quem está no outro computador, a
+          outra tira os atalhos deste aqui. Ambas dizem o que fazem ao passar o
+          mouse, e o rótulo mostra em qual estado estão. */}
+      <button
+        className={`tool ${outgoing.blockingLocalInput ? 'on' : ''}`}
+        onClick={() => controller.toggleBlockLocalInput()}
+        data-dica={
+          outgoing.blockingLocalInput
+            ? 'O teclado e o mouse FÍSICOS do outro computador estão travados: quem estiver sentado lá não consegue interferir. Clique para liberar.'
+            : 'Trava o teclado e o mouse físicos do outro computador, para que ninguém sentado lá atrapalhe o que você está fazendo.'
+        }
+      >
+        <IconLock />
+        {outgoing.blockingLocalInput ? 'Travado' : 'Travar lá'}
+      </button>
+
+      <button
+        className={`tool ${capturaTotal && capturaDisponivel ? 'on' : ''}`}
+        onClick={onToggleCaptura}
+        data-dica={
+          !capturaDisponivel
+            ? 'O Windows não permitiu instalar a captura total neste computador. As teclas comuns continuam indo; Ctrl+Shift+Esc e a tecla Windows ficam agindo aqui.'
+            : capturaTotal
+              ? 'Ligada: Ctrl+Shift+Esc, a tecla Windows e Alt+Tab agem no computador REMOTO. Este computador fica sem esses atalhos enquanto a janela estiver na frente. Ctrl+Alt+Shift+X continua encerrando a sessão.'
+              : 'Desligada: Ctrl+Shift+Esc e a tecla Windows agem NESTE computador. Ligue para mandar todas as teclas para o outro lado.'
+        }
+      >
+        <IconKeyboard />
+        {!capturaDisponivel ? 'Teclas: parcial' : capturaTotal ? 'Teclas: todas lá' : 'Teclas: só as comuns'}
+      </button>
+
+      <button
+        className="tool"
+        onClick={onToggleFullscreen}
+        data-dica="Tela cheia (Ctrl+Alt+Shift+F). Sair da tela cheia usa o mesmo atalho."
+      >
+        {fullscreen ? <IconExitFullscreen /> : <IconFullscreen />}
+      </button>
+
+      <span className="tool-sep" />
+
+      <button
+        className="tool"
+        onClick={onMinimize}
+        title="Minimizar o Ryke Desk"
+        aria-label="Minimizar o Ryke Desk"
+      >
+        <IconMinus />
+        Minimizar
+      </button>
+
+      {stats && (
+        <span className="tool-stats">
+          <span>
+            <b>{stats.width}×{stats.height}</b>
+          </span>
+          <span>
+            <b>{stats.fps}</b> qps
+          </span>
+          <span title="Ida e volta até o outro computador">
+            <b>{stats.rtt}</b> ms
+          </span>
+          {stats.atraso > 0 && (
+            <span title="Atraso da imagem: o tempo entre o quadro sair de lá e aparecer aqui">
+              <b>{stats.atraso}</b> ms img
+            </span>
+          )}
+          <span>
+            <b>{(stats.kbps / 1000).toFixed(1)}</b> Mb/s
+          </span>
+          <span>{stats.transport}</span>
+        </span>
+      )}
+
+      {/* Sessão adoecida: a imagem congela e o ponteiro remoto some junto com
+          ela. Sem este aviso — e sem devolver o cursor local, escondido por
+          CSS — a tela fica morta e o usuário não tem como saber o que houve. */}
+      {outgoing.instavel && (
+        <div className="reconectando">
+          <span className="giro-pequeno" />
+          <span>
+            <strong>Reconectando…</strong> a conexão parou de responder e está sendo refeita. A sessão continua
+            aberta — não é preciso fazer nada.
+          </span>
+        </div>
+      )}
+
+      {state.confirmacaoQualidade && (
+        <div className="confirma-qualidade">
+          <div className="confirma-texto">
+            <strong>A qualidade alta está funcionando?</strong>
+            <span>
+              Se a imagem travou ou ficou atrasada, não clique em nada — em{' '}
+              <b>{state.confirmacaoQualidade.segundos}s</b> a qualidade anterior volta sozinha.
+            </span>
+          </div>
+          <button className="btn sm" onClick={() => controller.desfazerQualidade()}>
+            Desfazer agora
+          </button>
+          <button className="btn sm primary" onClick={() => controller.confirmarQualidade()}>
+            OK, manter
+          </button>
+        </div>
+      )}
+
+      <button className="tool exit" onClick={() => controller.disconnect()} title="Encerrar (Ctrl+Alt+Shift+X)">
+        <IconPower />
+        Encerrar
+      </button>
+    </div>
+  );
+}
+
+// ───────────────────── painel de transferências ───────────────────
+
+function TransferDrawer({
+  controller,
+  transfers,
+  onClose,
+}: {
+  controller: Controller;
+  transfers: TransferView[];
+  onClose: () => void;
+}): React.JSX.Element {
+  return (
+    <aside className="drawer">
+      <div className="drawer-head">
+        <h3>Arquivos</h3>
+        <button className="icon-btn" onClick={onClose} aria-label="Fechar painel">
+          <IconX />
+        </button>
+      </div>
+
+      <div className="drawer-body">
+        {transfers.length === 0 ? (
+          <div className="empty">
+            Nenhum arquivo ainda.
+            <br />
+            Arraste um arquivo para cima da tela remota, ou use o botão abaixo.
+          </div>
+        ) : (
+          transfers.map((transfer) => (
+            <TransferRow key={transfer.id} transfer={transfer} onCancel={() => controller.cancelTransfer(transfer.id)} />
+          ))
+        )}
+      </div>
+
+      <div className="drawer-foot">
+        <div className="dropzone">
+          Arraste arquivos para esta janela
+          <br />
+          ou copie um arquivo no Explorador e clique no aviso que aparece
+        </div>
+        <button className="btn block" onClick={() => void controller.sendFileFromDialog()}>
+          <IconSend />
+          Escolher arquivo para enviar
+        </button>
+        <span className="hint">Limite de 500 MB por arquivo.</span>
+      </div>
+    </aside>
+  );
+}
+
+function TransferRow({ transfer, onCancel }: { transfer: TransferView; onCancel: () => void }): React.JSX.Element {
+  const pct = transfer.size > 0 ? Math.min(100, (transfer.transferred / transfer.size) * 100) : 0;
+  const concluido = transfer.state === 'concluido';
+  const falhou = transfer.state === 'erro' || transfer.state === 'recusado' || transfer.state === 'cancelado';
+  const ativo = transfer.state === 'ativo' || transfer.state === 'aguardando';
+
+  return (
+    <div className="transfer">
+      <div className="transfer-top">
+        <span className="arrow">{transfer.direction === 'enviando' ? <IconArrowUp /> : <IconArrowDown />}</span>
+        <span className="transfer-name" title={transfer.name}>
+          {transfer.name}
+        </span>
+        {ativo && (
+          <button className="icon-btn" style={{ width: 24, height: 24 }} onClick={onCancel} title="Cancelar">
+            <IconX />
+          </button>
+        )}
+        {concluido && transfer.path && (
+          <button
+            className="icon-btn"
+            style={{ width: 24, height: 24 }}
+            onClick={() => void window.ryke.files.reveal(transfer.path!)}
+            title="Mostrar na pasta"
+          >
+            <IconFolder />
+          </button>
+        )}
+      </div>
+
+      <div className="progress">
+        <div className={`progress-fill ${concluido ? 'done' : falhou ? 'bad' : ''}`} style={{ width: `${concluido ? 100 : pct}%` }} />
+      </div>
+
+      <div className="transfer-meta">
+        <span>
+          {concluido
+            ? `Concluído · ${formatBytes(transfer.size)}`
+            : falhou
+              ? (transfer.message ?? estadoLegivel(transfer.state))
+              : `${formatBytes(transfer.transferred)} de ${formatBytes(transfer.size)}`}
+        </span>
+        {ativo && transfer.rate > 0 && <span>{formatBytes(transfer.rate)}/s</span>}
+      </div>
+    </div>
+  );
+}
+
+function estadoLegivel(state: TransferView['state']): string {
+  switch (state) {
+    case 'recusado':
+      return 'Recusado pelo outro computador';
+    case 'cancelado':
+      return 'Cancelado';
+    case 'erro':
+      return 'Falhou';
+    default:
+      return '';
+  }
+}

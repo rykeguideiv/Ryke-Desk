@@ -1,0 +1,25 @@
+# Dependências e resultados de build — nunca vão para o repositório.
+node_modules/
+out/
+dist/
+release/
+*.tsbuildinfo
+*.log
+
+# Segredos: o servidor de encontro próprio lê tudo de variáveis de ambiente.
+# O .env.example fica versionado (é só modelo); o .env real, jamais.
+.env
+servidor-vps/.env
+
+# Certificados e chaves de assinatura — não entram no repositório de jeito
+# nenhum. A assinatura de release é feita pelo SignPath, com a chave no HSM
+# deles; nenhum material de assinatura mora aqui.
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+
+# Lixo de sistema operacional.
+.DS_Store
+Thumbs.db

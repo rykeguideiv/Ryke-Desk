@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023"],
+    "types": ["node", "electron-vite/node"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "// exclude": [
+    "A malha de encontro (mqtt, encontro, malha) roda na interface e nos",
+    "testes, nao no processo principal. Ela usa WebCrypto e WebSocket, que",
+    "vivem na lib DOM; incluir DOM aqui daria ao processo principal tipos de",
+    "APIs de navegador que ele nao tem. Excluir e mais honesto do que mentir",
+    "sobre o ambiente."
+  ],
+  "exclude": [
+    "src/shared/mqtt.ts",
+    "src/shared/encontro.ts",
+    "src/shared/nostr.ts",
+    "src/shared/malha.ts"
+  ],
+  "include": [
+    "src/main/**/*.ts",
+    "src/preload/**/*.ts",
+    "src/shared/**/*.ts",
+    "src/servidor/**/*.d.ts",
+    "electron.vite.config.ts"
+  ]
+}

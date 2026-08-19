@@ -1,0 +1,78 @@
+{
+  "name": "ryke-desk",
+  "version": "1.0.17",
+  "private": true,
+  "description": "Ryke Desk — acesso remoto seguro entre computadores",
+  "license": "GPL-3.0-or-later",
+  "author": {
+    "name": "Ryke",
+    "email": "contato@ryke.local"
+  },
+  "homepage": "https://ryke.local",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/auth.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/transfers.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/servidor-padrao.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/mqtt.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/encontro.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/malha.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/qualidade-captura.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/adaptacao.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/vigilancia.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/barra.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/teclado-global.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/botoes.test.mjs && node test/input-abi.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/clipboard-arquivos.test.mjs && node test/instalador.test.mjs",
+    "test:e2e": "npm run build && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/e2e.mjs",
+    "test": "npm run test:unit && npm run test:e2e",
+    "icon": "powershell -ExecutionPolicy Bypass -File build/make-icon.ps1",
+    "pack": "electron-vite build && electron-builder --win --dir --publish never",
+    "dist": "electron-vite build && electron-builder --win nsis --publish never"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.3.0",
+    "koffi": "^2.14.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.1",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  },
+  "build": {
+    "appId": "com.ryke.desk",
+    "productName": "Ryke Desk",
+    "copyright": "Copyright © 2026 Ryke",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/koffi/**"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": ["nsis"],
+      "requestedExecutionLevel": "requireAdministrator",
+      "artifactName": "RykeDesk-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
+      "runAfterFinish": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Ryke Desk",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

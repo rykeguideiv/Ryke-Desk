@@ -1,0 +1,2166 @@
+/* ══════════════════════════════════════════════════════════════════
+   Ryke Desk — sistema visual
+
+   Tema escuro único e assumido: o aplicativo passa a maior parte do
+   tempo mostrando a tela de outro computador, e uma moldura clara
+   competiria com o conteúdo. Toda a cor vem de uma paleta pequena,
+   com o azul reservado para ações e o verde para "está no ar".
+   ══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --bg: #0b0e14;
+  --bg-elevated: #10141d;
+  --surface: #151a25;
+  --surface-hi: #1c2331;
+  --border: #232b3b;
+  --border-soft: #1a2130;
+
+  --text: #e9eef8;
+  --text-dim: #94a2ba;
+  --text-faint: #5d6a80;
+
+  --accent: #4c7dff;
+  --accent-hi: #6b93ff;
+  --accent-deep: #2b5ce0;
+  --violet: #7b5bff;
+
+  --ok: #35d07f;
+  --warn: #f0b429;
+  --danger: #ff5b5b;
+
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 18px 50px rgb(0 0 0 / 55%);
+  --titlebar-h: 38px;
+
+  --sans: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-hi);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a3346;
+  background-clip: content-box;
+}
+
+/* ─────────────────────────── barra de título ─────────────────── */
+
+.titlebar {
+  height: var(--titlebar-h);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 12px;
+  background: rgb(10 14 26 / 55%);
+  border-bottom: 1px solid var(--border-soft);
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+}
+
+.titlebar .brand-logo {
+  height: 20px;
+  width: auto;
+  user-select: none;
+}
+
+.titlebar .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--text-dim);
+}
+
+.titlebar .brand-mark {
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--violet) 100%);
+  box-shadow: 0 0 14px rgb(76 125 255 / 45%);
+}
+
+.titlebar .spacer {
+  flex: 1;
+}
+
+.win-controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+}
+
+.win-controls button {
+  width: 44px;
+  height: var(--titlebar-h);
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+  transition: background 0.12s, color 0.12s;
+}
+
+.win-controls button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.win-controls button.close:hover {
+  background: #d63b3b;
+  color: #fff;
+}
+
+/* ───────────────────── tela de boas-vindas ─────────────────────── */
+
+.welcome {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  overflow-y: auto;
+}
+
+.welcome-logo {
+  width: 200px;
+  max-width: 60%;
+  height: auto;
+  margin-bottom: 2px;
+  filter: drop-shadow(0 6px 30px rgb(43 92 224 / 40%));
+  user-select: none;
+}
+
+.welcome-inner {
+  max-width: 780px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.welcome-head {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark.big {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  box-shadow: 0 0 34px rgb(76 125 255 / 50%);
+}
+
+.welcome-head h1 {
+  font-size: 30px;
+  font-weight: 680;
+  letter-spacing: 0.3px;
+}
+
+.welcome-head p {
+  color: var(--text-dim);
+  font-size: 14px;
+  max-width: 520px;
+  line-height: 1.6;
+}
+
+.welcome-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+@media (max-width: 720px) {
+  .welcome-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.welcome-card {
+  position: relative;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 26px 24px;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg-elevated) 100%);
+  border: 1px solid var(--border);
+  transition: transform 0.16s, border-color 0.16s, box-shadow 0.16s;
+}
+
+.welcome-card:hover:not(:disabled) {
+  transform: translateY(-3px);
+  border-color: #34405a;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 40%);
+}
+
+.welcome-card:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.welcome-card strong {
+  font-size: 16px;
+  font-weight: 640;
+}
+
+.welcome-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.welcome-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+
+.welcome-icon.receber {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
+  box-shadow: 0 8px 22px rgb(43 92 224 / 34%);
+}
+
+.welcome-icon.conectar {
+  background: linear-gradient(135deg, var(--violet) 0%, #5a3fd6 100%);
+  box-shadow: 0 8px 22px rgb(123 91 255 / 30%);
+}
+
+.welcome-nota {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.welcome-load {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  font-size: 11.5px;
+  color: var(--accent-hi);
+  font-weight: 600;
+}
+
+/* Aviso de modo: a diferença entre "funciona entre cidades" e "só na mesma
+   rede" é grande demais para ficar implícita. */
+.welcome-modo {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.welcome-modo svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.welcome-modo strong {
+  color: var(--text);
+}
+
+.welcome-modo code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgb(0 0 0 / 30%);
+  color: var(--text-dim);
+  user-select: text;
+}
+
+.welcome-modo.internet {
+  background: rgb(53 208 127 / 9%);
+  border: 1px solid rgb(53 208 127 / 24%);
+}
+
+.welcome-modo.internet svg {
+  color: var(--ok);
+}
+
+.welcome-modo.local {
+  background: rgb(240 180 41 / 9%);
+  border: 1px solid rgb(240 180 41 / 26%);
+}
+
+.welcome-modo.local svg {
+  color: var(--warn);
+}
+
+.welcome-rodape {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.6;
+}
+
+/* ──────────────────────────── layout base ───────────────────────── */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+
+/* Fundo da marca, bem discreto: cobre a janela inteira, atrás de todo o
+   conteúdo. A opacidade baixa e o degradê escuro por cima garantem que ele
+   ambiente sem competir com os textos. */
+.app-fundo {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center right;
+  background-repeat: no-repeat;
+  opacity: 0.14;
+  pointer-events: none;
+}
+
+.app-fundo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 14, 26, 0.55) 0%, rgba(10, 14, 26, 0.82) 100%);
+}
+
+/* O conteúdo fica acima da camada de fundo. */
+.titlebar,
+.home,
+.welcome,
+.footer,
+.viewer {
+  position: relative;
+  z-index: 1;
+}
+
+/* A TELA INICIAL CABE NA JANELA — ELA NÃO ROLA.
+
+   Era `overflow-y: auto` e o conteúdo simplesmente crescia: o botão de
+   conectar e a lista de favoritos ficavam abaixo da dobra, e a primeira coisa
+   que se fazia ao abrir o programa era rolar para achar o que usar. Numa tela
+   de duas colunas curtas, rolagem é sintoma de layout mal resolvido.
+
+   Agora a altura é fixa (`min-height: 0` é o que permite um filho de flex
+   encolher de verdade em vez de esticar o pai) e a única coisa que rola é a
+   lista de computadores salvos, dentro do próprio cartão. */
+.home {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 22px 34px 16px;
+  display: flex;
+}
+
+.home-inner {
+  max-width: 1080px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+.panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Os cartões acompanham a altura disponível e seguram o próprio conteúdo. */
+.panels > .card {
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px;
+  gap: 14px;
+}
+
+/* Estreitou demais para duas colunas: aí sim a rolagem volta, porque
+   empilhado o conteúdo realmente não cabe — e rolar é melhor do que cortar. */
+@media (max-width: 900px) {
+  .home {
+    overflow-y: auto;
+  }
+
+  .panels {
+    grid-template-columns: 1fr;
+    flex: none;
+  }
+
+  .panels > .card {
+    overflow: visible;
+  }
+}
+
+/* ─────────────────── barra superior da tela inicial ────────────── */
+
+.home-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: -4px;
+}
+
+.home-papel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.home-papel svg {
+  color: var(--accent-hi);
+}
+
+.home-ip {
+  margin-left: 4px;
+  padding-left: 9px;
+  border-left: 1px solid var(--border);
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ───────────────────────────── cartões ─────────────────────────── */
+
+.card {
+  background: linear-gradient(180deg, rgb(21 26 37 / 88%) 0%, rgb(16 20 29 / 90%) 100%);
+  backdrop-filter: blur(3px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.card-sub {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* ─────────────────────── o número deste PC ─────────────────────── */
+
+.my-id {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.my-id-value {
+  font-family: var(--mono);
+  font-size: 38px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(100deg, #ffffff 10%, #a8c0ff 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  user-select: text;
+  cursor: text;
+}
+
+.my-id-value.pending {
+  background: none;
+  -webkit-text-fill-color: var(--text-faint);
+  font-size: 32px;
+  letter-spacing: 4px;
+}
+
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  background: var(--surface-hi);
+  transition: all 0.14s;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  border-color: #33405a;
+  transform: translateY(-1px);
+}
+
+/* ───────────────────────── estado / selos ──────────────────────── */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.dot.on {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgb(53 208 127 / 16%);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+.dot.wait {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgb(240 180 41 / 16%);
+}
+
+.dot.off {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgb(255 91 91 / 14%);
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgb(53 208 127 / 16%); }
+  50% { box-shadow: 0 0 0 6px rgb(53 208 127 / 6%); }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--surface-hi);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.badge.ok {
+  color: var(--ok);
+  background: rgb(53 208 127 / 10%);
+  border-color: rgb(53 208 127 / 26%);
+}
+
+.badge.warn {
+  color: var(--warn);
+  background: rgb(240 180 41 / 10%);
+  border-color: rgb(240 180 41 / 26%);
+}
+
+/* ──────────────────────────── formulários ──────────────────────── */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  background: #0d111a;
+  border: 1px solid var(--border);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.14s, box-shadow 0.14s;
+  user-select: text;
+}
+
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(76 125 255 / 16%);
+}
+
+.input.id-input {
+  font-family: var(--mono);
+  font-size: 22px;
+  letter-spacing: 3px;
+  font-variant-numeric: tabular-nums;
+  height: 54px;
+  text-align: center;
+}
+
+.input-with-action {
+  position: relative;
+}
+
+.input-with-action .input {
+  padding-right: 44px;
+}
+
+.input-with-action button {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--text-faint);
+}
+
+.input-with-action button:hover {
+  color: var(--text);
+  background: var(--surface-hi);
+}
+
+/* ───────────────────────────── botões ──────────────────────────── */
+
+.btn {
+  height: 44px;
+  padding: 0 20px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background: var(--surface-hi);
+  border: 1px solid var(--border);
+  color: var(--text);
+  transition: all 0.14s;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: #222b3c;
+  border-color: #33405a;
+}
+
+.btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 6px 20px rgb(43 92 224 / 32%);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent-hi) 0%, var(--accent) 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 9px 26px rgb(43 92 224 / 42%);
+}
+
+.btn.danger {
+  background: rgb(255 91 91 / 12%);
+  border-color: rgb(255 91 91 / 32%);
+  color: #ff8b8b;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: rgb(255 91 91 / 20%);
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+
+.btn.ghost:hover:not(:disabled) {
+  background: var(--surface-hi);
+  color: var(--text);
+}
+
+.btn.block {
+  width: 100%;
+}
+
+.btn.sm {
+  height: 34px;
+  padding: 0 13px;
+  font-size: 13px;
+}
+
+/* ───────────────────────────── switch ──────────────────────────── */
+
+.switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+}
+
+.switch-text strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.switch-text span {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.switch-track {
+  width: 40px;
+  height: 23px;
+  border-radius: 999px;
+  background: #232b3b;
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.18s;
+}
+
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #6a778e;
+  transition: transform 0.18s, background 0.18s;
+}
+
+.switch input {
+  display: none;
+}
+
+.switch input:checked + .switch-track {
+  background: var(--accent);
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(17px);
+  background: #fff;
+}
+
+/* ─────────────────────────── recentes ──────────────────────────── */
+
+.recent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.recent-chip {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: var(--surface-hi);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  transition: all 0.14s;
+}
+
+.recent-chip:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* ─────────────────────────── rodapé ────────────────────────────── */
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 40px;
+  border-top: 1px solid var(--border-soft);
+  background: rgb(16 20 29 / 65%);
+  backdrop-filter: blur(3px);
+  font-size: 12px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* ───────────────────── discagem / conectando ───────────────────── */
+
+.dialing {
+  position: fixed;
+  inset: 0;
+  background: rgb(8 10 16 / 82%);
+  backdrop-filter: blur(14px);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+}
+
+.dialing-box {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 44px 56px;
+}
+
+.dialing-id {
+  font-family: var(--mono);
+  font-size: 30px;
+  letter-spacing: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dialing-phase {
+  color: var(--text-dim);
+  font-size: 13.5px;
+}
+
+.spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.85s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.steps {
+  display: flex;
+  gap: 8px;
+}
+
+.step {
+  width: 44px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.3s;
+}
+
+.step.done {
+  background: var(--accent);
+}
+
+/* ──────────────────────────── visualizador ─────────────────────── */
+
+.viewer {
+  position: relative;
+  flex: 1;
+  background: #000;
+  overflow: hidden;
+  display: flex;
+}
+
+/* AS DUAS SETAS, E POR QUE CADA UMA É DE UM JEITO
+
+   Sobre a imagem remota existem dois ponteiros, de donos diferentes:
+
+   A SUA é o cursor do sistema desta máquina, e ela é VERMELHA. A cor vem de
+   um cursor personalizado em CSS, não de um desenho nosso em cima da tela —
+   a diferença importa: um cursor de verdade é desenhado pelo Windows, então
+   continua instantâneo, sem depender de repintura da página. Trocar a cor não
+   custou um milissegundo de resposta.
+
+   A DELES (.seta-remota) é a posição real do cursor lá, que o anfitrião conta
+   pelo canal rápido. Fica no desenho padrão, claro — justamente para não
+   competir com a sua: você reconhece a sua pela cor, sem precisar pensar.
+
+   A seta de dentro do vídeo continua sem serventia aqui: ela chega com o
+   atraso da imagem, e ver o ponteiro responder meio segundo depois da mão
+   torna qualquer trabalho fino insuportável. */
+.viewer video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  outline: none;
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='23' viewBox='0 0 16 23'%3E%3Cpath d='M1.6 1.2 L1.6 17 L5.4 13.4 L8 19.9 L10.7 18.8 L8.1 12.5 L13.2 12.5 Z' fill='%23ff2f2f' stroke='%23ffffff' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E") 2 2, default;
+}
+
+/* A seta do computador remoto: desenho claro e padrão, com o nome da máquina
+   embaixo. Duas setas na tela só ajudam se forem distinguíveis à primeira
+   vista — e aqui quem carrega a cor é a sua, não a dela. */
+.seta-remota {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  pointer-events: none;
+  /* Sem transição: a marca tem de estar onde o cursor está, não atrás dele. */
+  will-change: transform;
+}
+
+/* Escondida enquanto quem está mexendo é você.
+   O computador remoto tem UM ponteiro físico só, e ele obedece ao seu mouse.
+   Enquanto você dirige, a posição que o anfitrião informa é a sua própria,
+   devolvida — desenhar a segunda seta ali empilharia duas marcas no mesmo
+   pixel, andando juntas, que é exatamente a confusão a ser evitada. Ela
+   reaparece no instante em que a posição de lá se descola da sua: é quando a
+   pessoa que está lá pegou o mouse dela. */
+.seta-remota.propria {
+  display: none;
+}
+
+.seta-remota svg {
+  display: block;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 55%));
+}
+
+.seta-remota span {
+  margin-left: 9px;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgb(238 244 255 / 94%);
+  color: #16203a;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
+}
+
+/* ─────────────────────── abas de conexão ───────────────────────── */
+
+/* Uma faixa fina no topo, no espírito do navegador: cada aba é um computador
+   inteiro conectado, e trocar entre elas não desfaz nada. Fica sobre o vídeo
+   em vez de empurrá-lo — a tela remota já usa cada pixel de altura que tem. */
+.barra-abas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 25;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 6px 0;
+  background: linear-gradient(180deg, rgb(8 11 18 / 92%) 0%, rgb(8 11 18 / 0%) 100%);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.barra-abas::-webkit-scrollbar {
+  display: none;
+}
+
+.aba {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  border-radius: 8px 8px 0 0;
+  background: rgb(21 26 37 / 78%);
+  border: 1px solid transparent;
+  border-bottom: none;
+  transition: background 0.14s;
+}
+
+.aba:hover {
+  background: rgb(28 35 49 / 90%);
+}
+
+.aba.ativa {
+  background: var(--surface-hi);
+  border-color: var(--border);
+}
+
+.aba-abrir {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 200px;
+  padding: 7px 4px 7px 10px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.aba.ativa .aba-abrir {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.aba-nome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* O estado de cada conexão, sem precisar entrar nela. Uma aba em segundo
+   plano que adoeceu precisa se anunciar — senão só se descobre ao voltar
+   para ela e encontrar a imagem congelada. */
+.aba-ponto {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.aba-ponto.ligando {
+  background: var(--warn);
+  animation: pulsar 1.1s ease-in-out infinite;
+}
+
+.aba-ponto.instavel {
+  background: var(--danger);
+}
+
+@keyframes pulsar {
+  50% { opacity: 0.25; }
+}
+
+.aba-fechar {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px 6px 4px;
+  color: var(--text-faint);
+  border-radius: 6px;
+}
+
+.aba-fechar:hover {
+  color: var(--danger);
+}
+
+.aba-nova {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  padding: 6px 9px;
+  margin-left: 3px;
+  border-radius: 7px;
+  color: var(--text-faint);
+}
+
+.aba-nova:hover {
+  background: var(--surface-hi);
+  color: var(--accent-hi);
+}
+
+/* Enquanto uma aba nova negocia, o vídeo dela ainda não existe. Some sem
+   ocupar espaço, para o cartão de discagem ficar sobre o preto. */
+.viewer video.apagado {
+  visibility: hidden;
+}
+
+.aba-discando {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(8 11 18 / 88%);
+}
+
+.aba-discando-cartao {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 30px 40px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.aba-discando-cartao strong {
+  font-family: var(--mono);
+  font-size: 20px;
+  color: var(--text);
+  letter-spacing: 1px;
+}
+
+.viewer.dragging::after {
+  content: "Solte para enviar ao outro computador";
+  position: absolute;
+  inset: 16px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  background: rgb(76 125 255 / 12%);
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+  pointer-events: none;
+  z-index: 40;
+}
+
+/* barra flutuante do visualizador */
+
+.toolbar {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  margin-top: 8px;
+  background: rgb(17 21 30 / 93%);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  transition: opacity 0.22s, transform 0.22s;
+}
+
+.toolbar.hidden {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-120%);
+  pointer-events: none;
+}
+
+.toolbar .grip {
+  width: 16px;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.tool {
+  position: relative;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 8px;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+
+/* Caixinha de explicação ao passar o mouse.
+   O `title` do sistema não serve aqui: demora quase um segundo para aparecer,
+   some sozinho, não quebra linha e some por completo em tela cheia. Estes
+   botões travam o teclado de outra pessoa e tiram os atalhos deste
+   computador — precisam dizer o que fazem antes do clique, não depois. */
+.tool[data-dica]::after {
+  content: attr(data-dica);
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: 320px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: var(--surface-hi, #1c2331);
+  border: 1px solid var(--border, #2a3346);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 55%);
+  color: var(--text, #e9eef8);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.tool[data-dica]:hover::after,
+.tool[data-dica]:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tool:hover {
+  background: var(--surface-hi);
+  color: var(--text);
+}
+
+.tool.on {
+  background: rgb(76 125 255 / 18%);
+  color: var(--accent-hi);
+}
+
+.tool.exit {
+  color: #ff8b8b;
+}
+
+.tool.exit:hover {
+  background: rgb(255 91 91 / 16%);
+}
+
+.tool-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 3px;
+}
+
+.tool-stats {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  padding: 0 9px;
+  display: flex;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-stats b {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* menus suspensos da barra */
+
+.tool-menu {
+  position: relative;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  min-width: 216px;
+  background: rgb(19 24 34 / 98%);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  box-shadow: var(--shadow);
+  padding: 5px;
+  z-index: 50;
+}
+
+.menu.right {
+  left: auto;
+  right: 0;
+}
+
+.menu-item {
+  width: 100%;
+  text-align: left;
+  padding: 8px 11px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.menu-item:hover {
+  background: var(--surface-hi);
+  color: var(--text);
+}
+
+.menu-item.active {
+  color: var(--accent-hi);
+}
+
+.menu-item small {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.menu-label {
+  padding: 7px 11px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ───────────────────── painel de transferências ────────────────── */
+
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  background: rgb(14 18 26 / 97%);
+  backdrop-filter: blur(18px);
+  border-left: 1px solid var(--border);
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  animation: slide-in 0.2s ease-out;
+}
+
+@keyframes slide-in {
+  from { transform: translateX(100%); }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.drawer-head h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drawer-foot {
+  padding: 12px;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dropzone {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 18px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  line-height: 1.7;
+}
+
+.transfer {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transfer-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.transfer-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress {
+  height: 4px;
+  border-radius: 2px;
+  background: #1c2331;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--violet));
+  transition: width 0.24s;
+}
+
+.progress-fill.done {
+  background: var(--ok);
+}
+
+.progress-fill.bad {
+  background: var(--danger);
+}
+
+.arrow {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 11px;
+  background: var(--surface-hi);
+  color: var(--text-dim);
+}
+
+/* ───────────────────────── modais e avisos ─────────────────────── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(6 8 12 / 74%);
+  backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  z-index: 80;
+  padding: 24px;
+}
+
+.modal {
+  width: 100%;
+  max-width: 470px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-height: 84vh;
+  overflow-y: auto;
+}
+
+.modal h2 {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.modal p {
+  font-size: 13.5px;
+  color: var(--text-dim);
+  line-height: 1.65;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.knock-id {
+  font-family: var(--mono);
+  font-size: 26px;
+  letter-spacing: 2px;
+  text-align: center;
+  padding: 16px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+/* avisos empilhados */
+
+.toasts {
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 400px;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgb(21 26 37 / 97%);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  animation: toast-in 0.2s ease-out;
+  line-height: 1.5;
+}
+
+@keyframes toast-in {
+  from { transform: translateX(24px); opacity: 0; }
+}
+
+.toast.ok { border-left: 3px solid var(--ok); }
+.toast.erro { border-left: 3px solid var(--danger); }
+.toast.info { border-left: 3px solid var(--accent); }
+
+.toast button {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.toast button:hover {
+  color: var(--text);
+}
+
+/* aviso de arquivo copiado */
+
+.clip-offer {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px 11px 16px;
+  background: rgb(21 26 37 / 97%);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  animation: toast-in 0.22s ease-out;
+}
+
+.clip-offer .name {
+  font-weight: 600;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─────────────── modos de acesso: supervisionado x senha ───────── */
+
+.mode-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  background: rgb(53 208 127 / 8%);
+  border: 1px solid rgb(53 208 127 / 22%);
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.mode-hint svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--ok);
+}
+
+.mode-hint strong {
+  color: var(--text);
+}
+
+.mode-hint.supervisionado {
+  background: rgb(76 125 255 / 9%);
+  border-color: rgb(76 125 255 / 26%);
+}
+
+.mode-hint.supervisionado svg {
+  color: var(--accent-hi);
+}
+
+.acesso-modo {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hi);
+  border: 1px solid var(--border);
+}
+
+.acesso-modo svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.acesso-modo strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.acesso-modo span {
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+/* Aviso de peso, para o pedido que chega sem senha nenhuma. */
+.aviso-forte {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 15px;
+  border-radius: var(--radius-sm);
+  background: rgb(240 180 41 / 10%);
+  border: 1px solid rgb(240 180 41 / 32%);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.aviso-forte svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--warn);
+}
+
+.aviso-forte strong {
+  color: var(--text);
+}
+
+/* ───────────────────── ajustes e listas ────────────────────────── */
+
+.setting-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.setting-row:last-child {
+  border-bottom: none;
+}
+
+.setting-row .path {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  word-break: break-all;
+  user-select: text;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.65;
+}
+
+.hint strong {
+  color: var(--text-dim);
+}
+
+.empty {
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  padding: 26px 12px;
+  line-height: 1.7;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* ── diagnóstico dos pontos de encontro ── */
+
+.pontos-lista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+
+.ponto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--txt-2, #9aa4bf);
+}
+
+.ponto-luz {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4b5566;
+}
+
+.ponto.on {
+  color: #d7dded;
+  border-color: rgba(74, 222, 128, 0.28);
+}
+
+.ponto.on .ponto-luz {
+  background: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.7);
+}
+
+.ponto.off {
+  opacity: 0.55;
+}
+
+.ponto-porta {
+  opacity: 0.6;
+  font-size: 10.5px;
+}
+
+/* Motivo pelo qual ainda não dá para conectar. Fica logo acima do botão,
+   onde o olho já está, e não num canto qualquer da tela. */
+.impedimento {
+  font-size: 12.5px;
+  color: var(--txt-2, #9aa4bf);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 7px 11px;
+  margin-bottom: 8px;
+}
+
+/* ─────────────────────────── favoritos ─────────────────────────── */
+
+/* A região que rola dentro do cartão, e só ela.
+   `min-height: 0` é o que faz um filho de flex poder encolher abaixo do
+   próprio conteúdo — sem isso a lista continuaria esticando o cartão e o
+   `overflow` nunca entraria em ação. */
+.listas-salvos {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0 -6px -4px 0;
+  padding-right: 6px;
+}
+
+.conta-salvos {
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-hi);
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.favoritos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* O favorito cujo número está no campo agora. Sem esta marca, clicar num
+   favorito não dava retorno nenhum: o número aparecia lá em cima e a lista
+   continuava idêntica, então não dava para ter certeza de que o clique pegou. */
+.favorito.escolhido {
+  border-color: var(--accent);
+  background: rgb(76 125 255 / 10%);
+}
+
+/* A chave diz que aquele computador entra sem digitar senha. É informação que
+   muda a expectativa antes do clique — sem ela, só se descobre ao conectar. */
+.favorito-chave {
+  display: inline-flex;
+  vertical-align: -1px;
+  margin-left: 5px;
+  color: var(--ok);
+}
+
+.favorito-acao.conectar:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.favorito-acao:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.favorito {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color 0.14s;
+}
+
+.favorito:hover {
+  border-color: var(--accent);
+}
+
+.favorito-abrir {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 12px;
+  text-align: left;
+  min-width: 0;
+}
+
+.favorito-nome {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.favorito-num {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.favorito-acao {
+  width: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  transition: color 0.14s, background 0.14s;
+}
+
+.favorito-acao:hover {
+  color: var(--text);
+  background: var(--surface-hi);
+}
+
+.favorito-acao.remover:hover {
+  color: var(--danger);
+}
+
+/* Ação discreta em forma de link, para o que é opcional. */
+.link-acao {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  margin: -4px 0 12px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  transition: color 0.14s;
+}
+
+/* Colado no número, e discreto: é uma ação rara e de efeito irreversível para
+   quem já passou o número adiante. Perto o bastante para ser encontrada,
+   apagada o bastante para não ser clicada sem querer. */
+.trocar-num {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.trocar-num:hover:not(:disabled) {
+  color: var(--warn);
+}
+
+/* Visível mesmo sem poder ser usado: é assim que a pessoa descobre que o
+   recurso existe antes de precisar dele. */
+.link-acao:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.caixinha.apagada {
+  opacity: 0.55;
+}
+
+.caixinha.apagada input {
+  cursor: default;
+}
+
+.link-acao:hover {
+  color: var(--accent-hi);
+}
+
+.salvar-favorito .hint {
+  margin-top: 5px;
+}
+
+/* ───────────── confirmação da qualidade alta ───────────── */
+
+/* Fica sobre o vídeo, no alto e ao centro: precisa ser visto sem procurar,
+   porque o prazo corre. Não bloqueia a tela — se a sessão travou, o usuário
+   ainda tem de conseguir enxergar o que está acontecendo atrás. */
+.confirma-qualidade {
+  position: absolute;
+  top: calc(var(--titlebar-h) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: var(--radius);
+  background: rgb(16 20 29 / 96%);
+  border: 1px solid var(--warn);
+  box-shadow: var(--shadow);
+  max-width: min(680px, 92vw);
+}
+
+.confirma-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.confirma-texto strong {
+  font-size: 13.5px;
+}
+
+.confirma-texto span {
+  color: var(--text-dim);
+}
+
+.confirma-texto b {
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─────────────── sessão instável (reconectando) ─────────────── */
+
+/* Sessão sendo refeita: a imagem esmaece para dizer que aquilo ali está
+   parado. O cursor não precisa mais de tratamento especial aqui — ele nunca
+   mais é escondido, justamente para não depender da imagem para existir. */
+.viewer.instavel video {
+  filter: grayscale(0.55) brightness(0.75);
+}
+
+/* E a seta do outro computador some enquanto a sessão está adoecida: a
+   posição que ela mostraria é a última que chegou, e apontar com convicção
+   para um lugar desatualizado é pior do que não apontar. */
+.viewer.instavel .seta-remota {
+  opacity: 0.35;
+}
+
+.reconectando {
+  position: absolute;
+  top: calc(var(--titlebar-h) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  max-width: min(560px, 92vw);
+  padding: 11px 15px;
+  border-radius: var(--radius);
+  background: rgb(16 20 29 / 96%);
+  border: 1px solid var(--warn);
+  box-shadow: var(--shadow);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.reconectando strong {
+  color: var(--text);
+}
+
+.giro-pequeno {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--warn);
+  animation: girar-pequeno 0.9s linear infinite;
+}
+
+@keyframes girar-pequeno {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ────────── caixinha de opção e estrela nos recentes ────────── */
+
+.caixinha {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 3%);
+  border: 1px solid var(--border-soft);
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.caixinha input {
+  margin-top: 2px;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.caixinha span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.caixinha small {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+.recent-chip {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-hi);
+  border: 1px solid var(--border);
+  transition: border-color 0.14s;
+}
+
+.recent-chip:hover {
+  border-color: var(--accent);
+}
+
+.recent-usar {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 6px 4px 6px 12px;
+  color: var(--text-dim);
+}
+
+.recent-chip:hover .recent-usar {
+  color: var(--text);
+}
+
+.recent-estrela {
+  display: grid;
+  place-items: center;
+  padding: 0 10px 0 6px;
+  color: var(--text-faint);
+}
+
+.recent-estrela:hover {
+  color: var(--warn);
+}

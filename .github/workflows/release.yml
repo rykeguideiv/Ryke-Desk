@@ -1,0 +1,86 @@
+# Constrói o instalador do Windows e o manda ao SignPath Foundation para ser
+# assinado. Só o binário construído AQUI, no GitHub Actions, a partir deste
+# repositório público, é assinado — é isso que o SignPath verifica.
+#
+# COMO DISPARA
+#   Ao enviar uma tag v<versão> (ex.: git tag v1.0.17 && git push origin v1.0.17)
+#   ou manualmente pela aba Actions ("Run workflow").
+#
+# ANTES DE FUNCIONAR (uma vez só, depois que o SignPath aprovar o projeto)
+#   1. Em Settings → Secrets and variables → Actions, crie o segredo
+#      SIGNPATH_API_TOKEN (o token da sua conta SignPath).
+#   2. Na mesma tela, aba Variables, crie SIGNPATH_ORGANIZATION_ID com o id da
+#      sua organização no SignPath.
+#   3. Ajuste project-slug e signing-policy-slug abaixo para os nomes que o
+#      SignPath criar para o seu projeto.
+#
+# Enquanto esses valores não existirem, o passo de build roda normalmente e
+# produz o instalador NÃO assinado como artefato — dá para testar todo o resto
+# sem depender do SignPath.
+
+name: Release (build + assinatura)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write # necessário para criar a Release e anexar o .exe assinado
+
+jobs:
+  build:
+    runs-on: windows-latest
+    outputs:
+      artifact-id: ${{ steps.subir.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Conferir tipos e testes de unidade
+        run: npm run typecheck && npm run test:unit
+
+      - name: Construir o instalador
+        run: npm run dist
+
+      - name: Guardar o instalador não assinado como artefato
+        id: subir
+        uses: actions/upload-artifact@v4
+        with:
+          name: ryke-desk-instalador
+          path: release/RykeDesk-Setup-*.exe
+          if-no-files-found: error
+
+  assinar:
+    needs: build
+    runs-on: ubuntu-latest
+    # Só tenta assinar quando as credenciais do SignPath já existem. Sem elas,
+    # o job é pulado e o instalador não assinado continua disponível no job
+    # acima — nada quebra enquanto o projeto ainda não foi aprovado.
+    if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+    steps:
+      - name: Enviar ao SignPath e aguardar a assinatura
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ryke-desk
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ needs.build.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: assinado
+
+      - name: Publicar o instalador ASSINADO na Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: assinado/*.exe
