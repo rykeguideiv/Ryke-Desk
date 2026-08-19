@@ -26,12 +26,13 @@ equipe pequena, uma mesma pessoa pode acumular papéis, mas **quem aprova nunca
 | **Revisor**  | Confere que o binário veio deste repositório, sem alteração fora dele.   |
 | **Aprovador**| Aprova manualmente cada pedido de assinatura no painel do SignPath.      |
 
-> Preencha os nomes/contas reais antes de aplicar ao SignPath — eles pedem isto
-> explícito:
->
-> - **Autor(es):** _(sua conta GitHub)_
-> - **Revisor(es):** _(sua conta GitHub)_
-> - **Aprovador(es):** _(sua conta GitHub)_
+Neste projeto, os três papéis são exercidos pela mesma pessoa — o que o
+SignPath permite, desde que a aprovação de cada release continue sendo um ato
+humano e explícito:
+
+- **Autor:** [@rykeguideiv](https://github.com/rykeguideiv)
+- **Revisor:** [@rykeguideiv](https://github.com/rykeguideiv)
+- **Aprovador:** [@rykeguideiv](https://github.com/rykeguideiv)
 
 ## Como uma assinatura acontece
 
