@@ -212,6 +212,26 @@ export type CtrlMouseMove = { t: 'mm'; x: number; y: number };
 export type CtrlMouseButton = { t: 'md' | 'mu'; b: 0 | 1 | 2; x: number; y: number };
 export type CtrlWheel = { t: 'wheel'; dx: number; dy: number; x: number; y: number };
 
+/**
+ * Movimento RELATIVO do ponteiro — o coração do Modo Gamer.
+ *
+ * A mensagem `mm` manda a POSIÇÃO absoluta: ótima para trabalhar, inútil para
+ * jogar. Num jogo de tiro, virar a mira 360° é empurrar o mouse sem parar; com
+ * posição absoluta o cursor bate na borda da tela e a câmera trava ali. Este
+ * evento manda o DESLOCAMENTO (dx, dy) desde o último quadro, que o anfitrião
+ * injeta em modo relativo — sem borda, girando à vontade. Em pixels do
+ * anfitrião. Ver INPUT_CHANNEL: também vai pelo canal rápido, sem garantia.
+ */
+export type CtrlMouseRel = { t: 'mr'; dx: number; dy: number };
+/**
+ * Clique no Modo Gamer: aperta ou solta sem reposicionar.
+ *
+ * Com o ponteiro travado (pointer lock), não existe "onde clicar" — o jogo usa
+ * a posição atual da mira. Reaproveitar `md`/`mu`, que carregam coordenada,
+ * faria o anfitrião teleportar o cursor antes de cada tiro.
+ */
+export type CtrlMouseRelButton = { t: 'mrb'; b: 0 | 1 | 2; down: boolean };
+
 /** `code` é o KeyboardEvent.code — posição física da tecla, não o caractere. */
 export type CtrlKey = { t: 'kd' | 'ku'; code: string; repeat?: boolean };
 /** Combinação disparada por botão da barra (Ctrl+Alt+Del, Alt+Tab, ...). */
@@ -257,6 +277,8 @@ export type CtrlMessage =
   | CtrlMeta
   | CtrlMouseMove
   | CtrlMouseButton
+  | CtrlMouseRel
+  | CtrlMouseRelButton
   | CtrlWheel
   | CtrlKey
   | CtrlCombo

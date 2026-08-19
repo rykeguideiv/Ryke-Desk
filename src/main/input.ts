@@ -161,6 +161,25 @@ export function moveMouseTo(physicalX: number, physicalY: number): void {
   dispatch([mouseInput(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, nx, ny)]);
 }
 
+/**
+ * Move o ponteiro por um DESLOCAMENTO, e não para um pixel — o Modo Gamer.
+ *
+ * Sem `MOUSEEVENTF_ABSOLUTE`, o Windows soma dx/dy à posição atual, do mesmo
+ * jeito que um mouse físico faria. É isto que deixa a mira girar sem fim: não
+ * há borda de tela para bater, porque não estamos apontando para lugar nenhum,
+ * só empurrando. Os jogos que leem entrada relativa (a maioria dos de tiro)
+ * enxergam este movimento e viram a câmera 360°.
+ *
+ * Aviso honesto: jogos com anticheat costumam recusar entrada injetada por
+ * software — isto funciona nos que não bloqueiam, não há como contornar aquilo
+ * sem um driver de dispositivo, e tentar seria justamente o que o anticheat
+ * existe para impedir.
+ */
+export function moveMouseRelative(dx: number, dy: number): void {
+  if (dx === 0 && dy === 0) return;
+  dispatch([mouseInput(MOUSEEVENTF_MOVE, Math.round(dx), Math.round(dy))]);
+}
+
 const BUTTON_FLAGS = [
   [MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP],
   [MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP],

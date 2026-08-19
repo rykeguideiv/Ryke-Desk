@@ -276,8 +276,13 @@ function installCaptureHandler(): void {
   );
 
   // A captura é sempre iniciada por nós, nunca por conteúdo remoto.
+  //
+  // `pointerLock` entra na lista por causa do Modo Gamer: é ele que prende o
+  // mouse na tela para a mira girar 360°. Sem liberar aqui, o pedido cairia no
+  // "negado" e o modo não travaria o ponteiro — falhando em silêncio. Só a
+  // NOSSA interface pede isso (nunca conteúdo remoto), então é seguro.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, done) => {
-    done(permission === 'media' || permission === 'display-capture');
+    done(permission === 'media' || permission === 'display-capture' || permission === 'pointerLock');
   });
 }
 
@@ -741,6 +746,10 @@ function registerIpc(): void {
     input.mouseButton(button, down);
   });
 
+  // Modo Gamer: deslocamento relativo (mira 360°) e clique sem reposicionar.
+  ipcMain.on('input:moveRel', (_e, dx: number, dy: number) => input.moveMouseRelative(dx, dy));
+  ipcMain.on('input:buttonRel', (_e, button: 0 | 1 | 2, down: boolean) => input.mouseButton(button, down));
+
   ipcMain.on('input:wheel', (_e, dx: number, dy: number) => input.mouseWheel(dx, dy));
   ipcMain.on('input:key', (_e, code: string, down: boolean) => input.key(code, down));
   ipcMain.on('input:combo', (_e, codes: string[]) => input.combo(codes));
@@ -849,6 +858,9 @@ function registerIpc(): void {
     if (on && mainWindow?.isFocused() === false) return true;
     return ligarCapturaDeTeclado(on);
   });
+
+  // Modo Gamer: enquanto ligado, o Esc puro deixa de minimizar e vai ao jogo.
+  ipcMain.on('teclado:escMinimiza', (_e, on: boolean) => tecladoGlobal.definirEscMinimiza(on));
 
   ipcMain.on('window:viewer', (_e, on: boolean) => {
     if (!mainWindow) return;

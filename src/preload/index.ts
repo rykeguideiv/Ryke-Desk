@@ -155,6 +155,9 @@ const api = {
     move: (fx: number, fy: number) => ipcRenderer.send('input:move', fx, fy),
     button: (button: 0 | 1 | 2, down: boolean, fx: number, fy: number) =>
       ipcRenderer.send('input:button', button, down, fx, fy),
+    // Modo Gamer: deslocamento relativo e clique sem reposicionar o cursor.
+    moveRel: (dx: number, dy: number) => ipcRenderer.send('input:moveRel', dx, dy),
+    buttonRel: (button: 0 | 1 | 2, down: boolean) => ipcRenderer.send('input:buttonRel', button, down),
     wheel: (dx: number, dy: number) => ipcRenderer.send('input:wheel', dx, dy),
     key: (code: string, down: boolean) => ipcRenderer.send('input:key', code, down),
     combo: (codes: string[]) => ipcRenderer.send('input:combo', codes),
@@ -228,10 +231,12 @@ const api = {
    */
   teclado: {
     capturar: (on: boolean) => ipcRenderer.invoke('teclado:capturar', on) as Promise<boolean>,
+    // Modo Gamer: quando false, o Esc puro deixa de minimizar e vai ao jogo.
+    escMinimiza: (on: boolean) => ipcRenderer.send('teclado:escMinimiza', on),
     onEvento: (
       fn: (evento:
         | { tipo: 'tecla'; code: string; pressionada: boolean }
-        | { tipo: 'acao'; qual: 'sair' | 'telaCheia' | 'minimizar' }
+        | { tipo: 'acao'; qual: 'sair' | 'telaCheia' | 'minimizar' | 'gamer' }
         | { tipo: 'soltar' }) => void,
     ) => subscribe('teclado:evento', fn),
   },

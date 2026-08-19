@@ -32,6 +32,21 @@ export const IconPlus = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const IconGamepad = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M6 12h4M8 10v4" />
+    <path d="M15.5 12h.01M18 10.5h.01" />
+    <rect x="2" y="6" width="20" height="12" rx="4" />
+  </svg>
+);
+
+export const IconEscape = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="6" width="18" height="12" rx="2.5" />
+    <path d="M10.5 10.2a2 2 0 1 0 0 3.6M13.5 10h1.8M13.5 12h1.6M13.5 14h1.8" />
+  </svg>
+);
+
 export const IconRefresh = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M20.5 12a8.5 8.5 0 1 1-2.5-6" />

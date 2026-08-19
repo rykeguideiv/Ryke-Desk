@@ -87,7 +87,7 @@ for (const [code, entrada] of Object.entries(SCAN_CODES)) {
 export type EventoTeclado =
   | { tipo: 'tecla'; code: string; pressionada: boolean }
   /** Combinação reservada à interface do próprio Ryke Desk. */
-  | { tipo: 'acao'; qual: 'sair' | 'telaCheia' | 'minimizar' }
+  | { tipo: 'acao'; qual: 'sair' | 'telaCheia' | 'minimizar' | 'gamer' }
   /** O gancho saiu: solte no outro lado tudo o que ficou pressionado. */
   | { tipo: 'soltar' };
 
@@ -95,6 +95,13 @@ let gancho: unknown = null;
 let ponteiroProc: ReturnType<typeof koffi.register> | null = null;
 let entregar: ((evento: EventoTeclado) => void) | null = null;
 const pressionadas = new Set<string>();
+/** Esc puro minimiza? Desligado pelo Modo Gamer para o Esc chegar ao jogo. */
+let escMinimizaLocal = true;
+
+/** Liga/desliga o comportamento de "Esc minimiza" (ver interpretar). */
+export function definirEscMinimiza(on: boolean): void {
+  escMinimizaLocal = on;
+}
 
 const temAlgum = (pressionadas: Set<string>, ...codes: string[]): boolean =>
   codes.some((c) => pressionadas.has(c));
@@ -110,7 +117,7 @@ const temAlgum = (pressionadas: Set<string>, ...codes: string[]): boolean =>
  * modificadores foram engolidos: para a janela, o Ctrl nunca chegou a ser
  * pressionado, e ela veria um "F" solto.
  */
-function acaoLocal(code: string, pressionadas: Set<string>): 'sair' | 'telaCheia' | null {
+function acaoLocal(code: string, pressionadas: Set<string>): 'sair' | 'telaCheia' | 'gamer' | null {
   if (
     !temAlgum(pressionadas, 'ControlLeft', 'ControlRight') ||
     !temAlgum(pressionadas, 'AltLeft', 'AltRight') ||
@@ -120,6 +127,9 @@ function acaoLocal(code: string, pressionadas: Set<string>): 'sair' | 'telaCheia
   }
   if (code === 'KeyX') return 'sair';
   if (code === 'KeyF') return 'telaCheia';
+  // A saída de emergência do Modo Gamer: com o ponteiro travado no jogo, a
+  // barra fica inalcançável, então precisa de um atalho que sempre funcione.
+  if (code === 'KeyG') return 'gamer';
   return null;
 }
 
@@ -147,6 +157,7 @@ export function interpretar(
   flags: number,
   wParam: number,
   pressionadas: Set<string>,
+  escMinimiza = true,
 ): Decisao {
   // Tecla injetada por software não pode ser capturada: quando esta mesma
   // máquina é anfitriã de outra sessão, engolir a própria injeção faria a
@@ -168,7 +179,11 @@ export function interpretar(
     // um modificador (Ctrl+Shift+Esc, Alt+Esc, Ctrl+Esc...) é um atalho de
     // verdade — vai para o outro lado, que é exatamente para isso que este
     // gancho existe (ver o topo do arquivo).
-    if (code === 'Escape' && !temAlgum(pressionadas, ...MODIFIER_CODES)) {
+    //
+    // O Modo Gamer desliga essa regra (escMinimiza = false): num jogo, Esc é
+    // "abrir o menu", não "sair da tela". Aí ele segue para o outro lado como
+    // qualquer outra tecla, em vez de minimizar.
+    if (escMinimiza && code === 'Escape' && !temAlgum(pressionadas, ...MODIFIER_CODES)) {
       pressionadas.clear();
       return { acao: 'engolir', eventos: [{ tipo: 'soltar' }, { tipo: 'acao', qual: 'minimizar' }] };
     }
@@ -190,7 +205,7 @@ const proc = (nCode: number, wParam: number, lParam: unknown): number => {
     if (nCode !== 0 || !entregar) return CallNextHookEx(null, nCode, wParam, lParam) as number;
 
     const info = koffi.decode(lParam, KBDLLHOOKSTRUCT) as { scanCode: number; flags: number };
-    const decisao = interpretar(info.scanCode, info.flags, wParam, pressionadas);
+    const decisao = interpretar(info.scanCode, info.flags, wParam, pressionadas, escMinimizaLocal);
     if (decisao.acao === 'passar') return CallNextHookEx(null, nCode, wParam, lParam) as number;
 
     for (const evento of decisao.eventos) entregar(evento);

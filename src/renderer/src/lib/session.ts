@@ -445,6 +445,12 @@ export class Session {
       case 'mu':
         window.ryke.input.button(msg.b, msg.t === 'md', msg.x, msg.y);
         break;
+      case 'mr':
+        window.ryke.input.moveRel(msg.dx, msg.dy);
+        break;
+      case 'mrb':
+        window.ryke.input.buttonRel(msg.b, msg.down);
+        break;
       case 'wheel':
         window.ryke.input.wheel(msg.dx, msg.dy);
         break;
@@ -663,6 +669,14 @@ export class Session {
   }
   sendMouseButton(button: 0 | 1 | 2, down: boolean, x: number, y: number): void {
     this.sendCtrl({ t: down ? 'md' : 'mu', b: button, x, y });
+  }
+  /** Modo Gamer: deslocamento relativo da mira (canal rápido, pode perder). */
+  sendMouseRel(dx: number, dy: number): void {
+    this.sendRapido({ t: 'mr', dx, dy });
+  }
+  /** Modo Gamer: clique sem reposicionar. Confiável — perder um tiro irrita. */
+  sendMouseRelButton(button: 0 | 1 | 2, down: boolean): void {
+    this.sendCtrl({ t: 'mrb', b: button, down });
   }
   sendWheel(dx: number, dy: number, x: number, y: number): void {
     this.sendCtrl({ t: 'wheel', dx, dy, x, y });

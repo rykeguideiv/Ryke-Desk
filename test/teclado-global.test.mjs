@@ -111,6 +111,33 @@ console.log('\n── o que precisa continuar acontecendo aqui ──\n');
   const f = apertar(q, 'KeyF');
   check('Ctrl+Alt+Shift+F alterna a tela cheia local',
     f.eventos.some((e) => e.tipo === 'acao' && e.qual === 'telaCheia'));
+
+  const g = new Set();
+  apertar(g, 'ControlLeft');
+  apertar(g, 'AltLeft');
+  apertar(g, 'ShiftLeft');
+  const gamer = apertar(g, 'KeyG');
+  check('Ctrl+Alt+Shift+G sai do Modo Gamer (saída de emergência)',
+    gamer.eventos.some((e) => e.tipo === 'acao' && e.qual === 'gamer'));
+}
+
+console.log('\n── Modo Gamer: o Esc deixa de minimizar ──\n');
+
+{
+  // Com escMinimiza = false, o Esc puro vira tecla comum e segue para o jogo,
+  // em vez de minimizar a sessão. É o que o botão "Desativar Esc" liga.
+  const p = new Set();
+  const esc = interpretar(SCAN_CODES.Escape[0], 0, WM_KEYDOWN, p, false);
+  check('Esc sozinho, com "Desativar Esc", vai para o outro lado',
+    esc.acao === 'engolir' && teclasDe(esc).join('') === 'Escape↓' &&
+      !esc.eventos.some((e) => e.tipo === 'acao'),
+    teclasDe(esc).join(''));
+
+  // E o padrão (escMinimiza = true) continua minimizando, como sempre.
+  const q = new Set();
+  const escPadrao = interpretar(SCAN_CODES.Escape[0], 0, WM_KEYDOWN, q, true);
+  check('e sem "Desativar Esc" ele minimiza como antes',
+    escPadrao.eventos.some((e) => e.tipo === 'acao' && e.qual === 'minimizar'));
 }
 
 {

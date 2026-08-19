@@ -9,7 +9,7 @@ import type { TransferView } from '../lib/files';
 import {
   IconMonitor, IconKeyboard, IconFiles, IconFullscreen, IconExitFullscreen,
   IconPower, IconGrip, IconX, IconArrowUp, IconArrowDown, IconFolder, IconLock, IconSend,
-  IconMinus, IconShield, IconPlus,
+  IconMinus, IconShield, IconPlus, IconGamepad, IconEscape,
 } from './icons';
 import { NovaConexao } from './Modals';
 
@@ -25,6 +25,7 @@ import { NovaConexao } from './Modals';
 const ATALHOS_LOCAIS = {
   sair: (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyX',
   telaCheia: (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyF',
+  gamer: (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyG',
 };
 
 /** Versão curta das etapas de conexão, para caber dentro de uma aba. */
@@ -102,6 +103,17 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   const [capturaTotal, setCapturaTotal] = useState(true);
   const [capturaDisponivel, setCapturaDisponivel] = useState(true);
   const [novaConexao, setNovaConexao] = useState(false);
+  /**
+   * Modo Gamer: mouse relativo (mira 360°) com o ponteiro travado.
+   *
+   * Ligado, um clique na tela trava o ponteiro (pointer lock) e o movimento
+   * passa a ir como DESLOCAMENTO, não posição — é o que deixa a câmera girar
+   * sem parar na borda. `travado` diz se o ponteiro está preso agora.
+   */
+  const [gamer, setGamer] = useState(false);
+  const [travado, setTravado] = useState(false);
+  /** Esc puro minimiza? Desligável para o Esc chegar ao jogo (Desativar Esc). */
+  const [escMinimiza, setEscMinimiza] = useState(true);
   /** Número que acabou de conectar e ainda não foi nomeado (prompt aberto). */
   const [nomeando, setNomeando] = useState<string | null>(null);
   const [nomeTmp, setNomeTmp] = useState('');
@@ -176,6 +188,44 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     window.ryke.window.minimize();
   }, [session, fullscreen]);
 
+  /** Liga/desliga o Modo Gamer. Ao desligar, solta o ponteiro travado. */
+  const alternarGamer = useCallback(() => {
+    setGamer((on) => {
+      const novo = !on;
+      if (!novo && document.pointerLockElement) document.exitPointerLock();
+      return novo;
+    });
+  }, []);
+
+  const sairDoGamer = useCallback(() => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    setGamer(false);
+  }, []);
+
+  /**
+   * Liga/desliga "Esc minimiza".
+   *
+   * Precisa avisar também o gancho do processo principal: com a captura total
+   * ligada, é ele quem vê o Esc primeiro, e sem esse aviso o Esc continuaria
+   * minimizando antes de a janela ter chance de mandá-lo ao jogo.
+   */
+  const alternarEsc = useCallback(() => {
+    setEscMinimiza((on) => {
+      const novo = !on;
+      window.ryke.teclado.escMinimiza(novo);
+      return novo;
+    });
+  }, []);
+
+  // Acompanha o estado real da trava do ponteiro: Alt+Tab, foco perdido ou a
+  // saída pelo próprio sistema soltam a trava por fora, e a interface precisa
+  // refletir isso (mostrar o aviso "clique para jogar").
+  useEffect(() => {
+    const aoMudar = (): void => setTravado(document.pointerLockElement === videoRef.current);
+    document.addEventListener('pointerlockchange', aoMudar);
+    return () => document.removeEventListener('pointerlockchange', aoMudar);
+  }, []);
+
   useEffect(() => {
     if (!session) return;
 
@@ -185,10 +235,18 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     };
 
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.code === 'Escape') {
+      // Esc minimiza — a não ser que "Desativar Esc" esteja ligado, quando ele
+      // vira uma tecla comum e segue para o jogo como qualquer outra.
+      if (e.code === 'Escape' && escMinimiza && !isTypingLocally(e.target)) {
         e.preventDefault();
         e.stopImmediatePropagation();
         sairDaSessao();
+        return;
+      }
+      // Saída de emergência do Modo Gamer, sempre disponível.
+      if (ATALHOS_LOCAIS.gamer(e)) {
+        e.preventDefault();
+        sairDoGamer();
         return;
       }
       // Deixa passar o que é digitado num campo da nossa própria interface.
@@ -249,7 +307,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       window.removeEventListener('blur', soltarTudo);
       soltarTudo();
     };
-  }, [session, controller, fullscreen, sairDaSessao]);
+  }, [session, controller, fullscreen, sairDaSessao, sairDoGamer, escMinimiza]);
 
   // ── teclado, o resto dele ──
   //
@@ -279,6 +337,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       if (evento.tipo === 'acao') {
         if (evento.qual === 'sair') controller.disconnect();
         if (evento.qual === 'minimizar') sairDaSessao();
+        if (evento.qual === 'gamer') sairDoGamer();
         if (evento.qual === 'telaCheia') {
           setFullscreen((on) => {
             window.ryke.window.fullscreen(!on);
@@ -295,8 +354,9 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       }
       // Mesmo trato do teclado comum. Com a captura total ligada esta é a
       // única chance de tratar o Esc — o gancho engole a tecla antes de a
-      // janela vê-la.
-      if (evento.code === 'Escape') {
+      // janela vê-la. Com "Desativar Esc", ele deixa de minimizar e segue
+      // para o outro lado como uma tecla qualquer (cai no envio lá embaixo).
+      if (evento.code === 'Escape' && escMinimiza) {
         if (evento.pressionada) sairDaSessao();
         return;
       }
@@ -311,7 +371,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       parar();
       void window.ryke.teclado.capturar(false);
     };
-  }, [session, controller, capturaTotal, pausarCaptura, fullscreen, sairDaSessao]);
+  }, [session, controller, capturaTotal, pausarCaptura, fullscreen, sairDaSessao, sairDoGamer, escMinimiza]);
 
   /**
    * Digitar num campo da própria interface (nome de arquivo, busca) enquanto o
@@ -403,11 +463,23 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   const pendingMove = useRef<Fraction | null>(null);
   const rafId = useRef<number | null>(null);
 
+  /** Deslocamento acumulado do Modo Gamer, somado entre quadros. */
+  const pendingRel = useRef({ dx: 0, dy: 0 });
+
   const flushMove = useCallback(() => {
     rafId.current = null;
+    if (!session) return;
+    // Relativo (Modo Gamer): manda a SOMA do quadro. Somar, e não substituir,
+    // é o que preserva o movimento — cada quadro pode ter vários eventos, e
+    // perder qualquer um deles faria a mira andar menos do que a mão.
+    const rel = pendingRel.current;
+    if (rel.dx !== 0 || rel.dy !== 0) {
+      session.sendMouseRel(rel.dx, rel.dy);
+      pendingRel.current = { dx: 0, dy: 0 };
+    }
     const point = pendingMove.current;
     pendingMove.current = null;
-    if (point && session) session.sendMouseMove(point.x, point.y);
+    if (point) session.sendMouseMove(point.x, point.y);
   }, [session]);
 
   /**
@@ -424,11 +496,27 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     setToolbarVisible((aberta) => decidirBarra(aberta, e.clientY, e.screenY));
   }, []);
 
+  /** O ponteiro está travado no vídeo agora? (Modo Gamer em jogo.) */
+  const jogando = (video: HTMLVideoElement): boolean =>
+    gamer && document.pointerLockElement === video;
+
   const onPointerMove = (e: React.PointerEvent<HTMLVideoElement>): void => {
     const video = videoRef.current;
     if (!video || !session) return;
-    const point = pointerToFraction(video, e.clientX, e.clientY);
 
+    // Modo Gamer travado: manda deslocamento, não posição. Escala pela razão
+    // entre a resolução remota e o tamanho exibido, para a sensibilidade ficar
+    // parecida com mexer o mouse direto na outra máquina.
+    if (jogando(video)) {
+      const r = video.getBoundingClientRect();
+      const escala = r.width > 0 && video.videoWidth > 0 ? video.videoWidth / r.width : 1;
+      pendingRel.current.dx += e.movementX * escala;
+      pendingRel.current.dy += e.movementY * escala;
+      if (rafId.current === null) rafId.current = requestAnimationFrame(flushMove);
+      return;
+    }
+
+    const point = pointerToFraction(video, e.clientX, e.clientY);
     if (!point) return;
     lastPoint.current = point;
     // Um pacote por quadro: a 60 Hz o mouse já parece instantâneo, e mandar
@@ -440,6 +528,19 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   const onPointerDown = (e: React.PointerEvent<HTMLVideoElement>): void => {
     const video = videoRef.current;
     if (!video || !session || e.button > 2) return;
+
+    if (gamer) {
+      // Fora da trava, o primeiro clique só serve para PRENDER o ponteiro — é
+      // a exigência do navegador (pointer lock nasce de um gesto). Preso, o
+      // clique vira tiro: aperta sem reposicionar, que o jogo mira sozinho.
+      if (document.pointerLockElement !== video) {
+        void video.requestPointerLock?.();
+        return;
+      }
+      session.sendMouseRelButton(e.button as 0 | 1 | 2, true);
+      return;
+    }
+
     // Captura o ponteiro para que arrastar até fora do vídeo continue valendo
     // (selecionar texto, mover janela remota até a borda).
     video.setPointerCapture(e.pointerId);
@@ -451,6 +552,12 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   const onPointerUp = (e: React.PointerEvent<HTMLVideoElement>): void => {
     const video = videoRef.current;
     if (!video || !session || e.button > 2) return;
+
+    if (gamer) {
+      if (document.pointerLockElement === video) session.sendMouseRelButton(e.button as 0 | 1 | 2, false);
+      return;
+    }
+
     if (video.hasPointerCapture(e.pointerId)) video.releasePointerCapture(e.pointerId);
     const point = pointerToFraction(video, e.clientX, e.clientY) ?? lastPoint.current;
     session.sendMouseButton(e.button as 0 | 1 | 2, false, point.x, point.y);
@@ -587,6 +694,16 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         onLoadedMetadata={posicionarMarca}
       />
 
+      {/* Modo Gamer ligado, mas o ponteiro ainda solto: o navegador só trava
+          num clique, então avisamos o que fazer. Some assim que trava. */}
+      {gamer && !travado && !conectandoNestaAba && (
+        <div className="gamer-aviso" onPointerDown={() => videoRef.current?.requestPointerLock?.()}>
+          <strong>Modo Gamer ligado</strong>
+          <span>Clique na tela para jogar — a mira gira 360°.</span>
+          <span className="gamer-saida">Ctrl+Alt+Shift+G sai do modo · Esc {escMinimiza ? 'minimiza' : 'vai para o jogo'}</span>
+        </div>
+      )}
+
       {/* Discagem da aba nova, por dentro do visualizador. A tela cheia de
           "conectando" só faz sentido na primeira conexão, quando não há nada
           atrás; aqui atrás existem sessões em uso. */}
@@ -637,6 +754,10 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         capturaTotal={capturaTotal}
         capturaDisponivel={capturaDisponivel}
         onToggleCaptura={() => setCapturaTotal((v) => !v)}
+        gamer={gamer}
+        onToggleGamer={alternarGamer}
+        escMinimiza={escMinimiza}
+        onToggleEsc={alternarEsc}
       />
 
       {showDrawer && (
@@ -678,6 +799,10 @@ function Toolbar({
   capturaTotal,
   capturaDisponivel,
   onToggleCaptura,
+  gamer,
+  onToggleGamer,
+  escMinimiza,
+  onToggleEsc,
 }: {
   controller: Controller;
   state: State;
@@ -691,6 +816,10 @@ function Toolbar({
   capturaTotal: boolean;
   capturaDisponivel: boolean;
   onToggleCaptura: () => void;
+  gamer: boolean;
+  onToggleGamer: () => void;
+  escMinimiza: boolean;
+  onToggleEsc: () => void;
 }): React.JSX.Element {
   const [menu, setMenu] = useState<'monitor' | 'teclas' | 'qualidade' | null>(null);
   const outgoing = state.outgoing!;
@@ -863,6 +992,32 @@ function Toolbar({
       >
         <IconKeyboard />
         {!capturaDisponivel ? 'Teclas: parcial' : capturaTotal ? 'Teclas: todas lá' : 'Teclas: só as comuns'}
+      </button>
+
+      <button
+        className={`tool ${gamer ? 'on' : ''}`}
+        onClick={onToggleGamer}
+        data-dica={
+          gamer
+            ? 'Modo Gamer ligado: o mouse gira a mira 360° sem travar na borda. Clique na tela para prender o ponteiro; Ctrl+Alt+Shift+G sai. Jogos com anticheat podem recusar o controle.'
+            : 'Liga o controle de jogo: o mouse passa a virar o personagem 360°, sem parar na borda da tela. É o que faz jogos de tiro funcionarem pelo acesso remoto.'
+        }
+      >
+        <IconGamepad />
+        {gamer ? 'Gamer: ligado' : 'Modo Gamer'}
+      </button>
+
+      <button
+        className={`tool ${!escMinimiza ? 'on' : ''}`}
+        onClick={onToggleEsc}
+        data-dica={
+          escMinimiza
+            ? 'O Esc hoje minimiza a sessão. Clique para DESATIVAR: o Esc passa a ir para o jogo/programa remoto (abrir menu, pausar) em vez de minimizar.'
+            : 'Esc desativado: ele vai para o outro computador. Para minimizar, use este botão para reativar, ou Ctrl+Alt+Shift+X para encerrar.'
+        }
+      >
+        <IconEscape />
+        {escMinimiza ? 'Desativar Esc' : 'Esc: vai pro jogo'}
       </button>
 
       <button

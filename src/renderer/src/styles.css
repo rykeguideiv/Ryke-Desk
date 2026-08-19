@@ -1209,6 +1209,39 @@ button {
   margin-top: 2px;
 }
 
+/* Aviso do Modo Gamer enquanto o ponteiro ainda não foi travado. Cobre a tela
+   e convida ao clique que prende o mouse; some no instante em que trava. */
+.gamer-aviso {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgb(8 11 18 / 55%);
+  cursor: pointer;
+  text-align: center;
+  padding: 0 24px;
+}
+
+.gamer-aviso strong {
+  font-size: 20px;
+  color: var(--text);
+}
+
+.gamer-aviso span {
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.gamer-aviso .gamer-saida {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
 /* Recente já salvo com nome: sai do monospace do número e ganha a estrela
    acesa, para distinguir de um número solto na mesma lista. */
 .recent-chip.nomeado .recent-usar {
