@@ -127,9 +127,9 @@ function acaoLocal(code: string, pressionadas: Set<string>): 'sair' | 'telaCheia
   }
   if (code === 'KeyX') return 'sair';
   if (code === 'KeyF') return 'telaCheia';
-  // A saída de emergência do Modo Gamer: com o ponteiro travado no jogo, a
-  // barra fica inalcançável, então precisa de um atalho que sempre funcione.
-  if (code === 'KeyG') return 'gamer';
+  // A saída do Modo Gamer (Shift+G) NÃO mora aqui: ela depende de o modo estar
+  // ligado, e só a interface sabe disso. Tratar no gancho roubaria o Shift+G
+  // do uso normal — deixaria de digitar "G" maiúsculo no computador remoto.
   return null;
 }
 

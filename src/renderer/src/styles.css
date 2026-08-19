@@ -1263,6 +1263,25 @@ button {
   font-family: var(--mono);
 }
 
+/* Linha do atalho de saída no diálogo do Modo Gamer: precisa saltar aos olhos,
+   porque é a informação que a pessoa tem de levar para dentro do jogo. */
+.atalho-saida {
+  margin: 4px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgb(76 125 255 / 12%);
+  border: 1px solid var(--accent);
+  font-size: 15px;
+  text-align: center;
+  color: var(--text);
+}
+
+.atalho-saida b {
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--accent-hi);
+}
+
 /* Recente já salvo com nome: sai do monospace do número e ganha a estrela
    acesa, para distinguir de um número solto na mesma lista. */
 .recent-chip.nomeado .recent-usar {

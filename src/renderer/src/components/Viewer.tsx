@@ -25,7 +25,6 @@ import { NovaConexao } from './Modals';
 const ATALHOS_LOCAIS = {
   sair: (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyX',
   telaCheia: (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyF',
-  gamer: (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyG',
 };
 
 /** Versão curta das etapas de conexão, para caber dentro de uma aba. */
@@ -112,6 +111,8 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
    */
   const [gamer, setGamer] = useState(false);
   const [travado, setTravado] = useState(false);
+  /** Diálogo que ensina o atalho de saída antes de ligar o Modo Gamer. */
+  const [confirmandoGamer, setConfirmandoGamer] = useState(false);
   /** Esc puro minimiza? Desligável para o Esc chegar ao jogo (Desativar Esc). */
   const [escMinimiza, setEscMinimiza] = useState(true);
   /** Número que acabou de conectar e ainda não foi nomeado (prompt aberto). */
@@ -131,7 +132,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
    * teclas: era o "às vezes não deixa digitar". Aqui a pausa é determinística —
    * a captura desliga junto com a abertura do modal ou do prompt de nome.
    */
-  const pausarCaptura = novaConexao || nomeando !== null;
+  const pausarCaptura = novaConexao || nomeando !== null || confirmandoGamer;
   /**
    * A aba da frente ainda está discando?
    *
@@ -188,13 +189,27 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     window.ryke.window.minimize();
   }, [session, fullscreen]);
 
-  /** Liga/desliga o Modo Gamer. Ao desligar, solta o ponteiro travado. */
+  /**
+   * O botão Modo Gamer.
+   *
+   * Ligar passa antes pelo diálogo que ensina o atalho de saída — com o
+   * ponteiro preso não dá para clicar no botão de novo, então a pessoa PRECISA
+   * saber o Shift+G antes de entrar. Desligar é direto (quando ainda dá para
+   * clicar, ou seja, ponteiro solto).
+   */
   const alternarGamer = useCallback(() => {
-    setGamer((on) => {
-      const novo = !on;
-      if (!novo && document.pointerLockElement) document.exitPointerLock();
-      return novo;
-    });
+    if (gamer) {
+      if (document.pointerLockElement) document.exitPointerLock();
+      setGamer(false);
+      return;
+    }
+    setConfirmandoGamer(true);
+  }, [gamer]);
+
+  /** Confirmou que leu o atalho: agora sim liga o modo. */
+  const confirmarGamer = useCallback(() => {
+    setConfirmandoGamer(false);
+    setGamer(true);
   }, []);
 
   const sairDoGamer = useCallback(() => {
@@ -243,8 +258,9 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         sairDaSessao();
         return;
       }
-      // Saída de emergência do Modo Gamer, sempre disponível.
-      if (ATALHOS_LOCAIS.gamer(e)) {
+      // Saída do Modo Gamer: Shift+G, e SÓ com o modo ligado — fora dele,
+      // Shift+G continua sendo "G maiúsculo" para o computador remoto.
+      if (gamer && e.shiftKey && e.code === 'KeyG') {
         e.preventDefault();
         sairDoGamer();
         return;
@@ -307,7 +323,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       window.removeEventListener('blur', soltarTudo);
       soltarTudo();
     };
-  }, [session, controller, fullscreen, sairDaSessao, sairDoGamer, escMinimiza]);
+  }, [session, controller, fullscreen, sairDaSessao, sairDoGamer, escMinimiza, gamer]);
 
   // ── teclado, o resto dele ──
   //
@@ -337,7 +353,6 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       if (evento.tipo === 'acao') {
         if (evento.qual === 'sair') controller.disconnect();
         if (evento.qual === 'minimizar') sairDaSessao();
-        if (evento.qual === 'gamer') sairDoGamer();
         if (evento.qual === 'telaCheia') {
           setFullscreen((on) => {
             window.ryke.window.fullscreen(!on);
@@ -361,6 +376,16 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         return;
       }
 
+      // Saída do Modo Gamer: Shift+G, só com o modo ligado. Com a captura total
+      // o gancho é a única chance de ver essa tecla — a janela nunca a recebe.
+      if (
+        gamer && evento.pressionada && evento.code === 'KeyG' &&
+        (pressed.current.has('ShiftLeft') || pressed.current.has('ShiftRight'))
+      ) {
+        sairDoGamer();
+        return;
+      }
+
       if (evento.pressionada) pressed.current.add(evento.code);
       else pressed.current.delete(evento.code);
       session.sendKey(evento.code, evento.pressionada);
@@ -371,7 +396,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       parar();
       void window.ryke.teclado.capturar(false);
     };
-  }, [session, controller, capturaTotal, pausarCaptura, fullscreen, sairDaSessao, sairDoGamer, escMinimiza]);
+  }, [session, controller, capturaTotal, pausarCaptura, fullscreen, sairDaSessao, sairDoGamer, escMinimiza, gamer]);
 
   /**
    * Digitar num campo da própria interface (nome de arquivo, busca) enquanto o
@@ -644,6 +669,35 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         <NovaConexao controller={controller} state={state} onClose={() => setNovaConexao(false)} />
       )}
 
+      {confirmandoGamer && (
+        <div className="overlay" onClick={(e) => e.target === e.currentTarget && setConfirmandoGamer(false)}>
+          <div className="modal" style={{ maxWidth: 440 }}>
+            <h2>
+              <IconGamepad /> Modo Gamer
+            </h2>
+            <p>
+              O mouse vai virar a mira <strong>360°</strong>, sem parar na borda da tela. Para isso, o cursor fica
+              <strong> preso à tela e some</strong> enquanto você joga.
+            </p>
+            <p className="atalho-saida">
+              Para SAIR do Modo Gamer, aperte <b>Shift + G</b>.
+            </p>
+            <p className="hint">
+              Guarde esse atalho: com o cursor preso, não dá para clicar no botão para desligar. Enquanto o modo
+              estiver ligado, o Shift+G não chega ao jogo — fica reservado para a saída.
+            </p>
+            <div className="modal-actions">
+              <button className="btn ghost" onClick={() => setConfirmandoGamer(false)}>
+                Cancelar
+              </button>
+              <button className="btn primary" onClick={confirmarGamer} autoFocus>
+                OK, entendi o Shift+G
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {nomeando && (
         <div className="nomear-conexao" onPointerDown={(e) => e.stopPropagation()}>
           <div className="nomear-cartao">
@@ -700,7 +754,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         <div className="gamer-aviso" onPointerDown={() => videoRef.current?.requestPointerLock?.()}>
           <strong>Modo Gamer ligado</strong>
           <span>Clique na tela para jogar — a mira gira 360°. O cursor fica preso e some.</span>
-          <span className="gamer-saida">Para sair a qualquer momento: Ctrl+Alt+Shift+G · Esc {escMinimiza ? 'minimiza' : 'vai para o jogo'}</span>
+          <span className="gamer-saida">Para sair a qualquer momento: <b>Shift+G</b> · Esc {escMinimiza ? 'minimiza' : 'vai para o jogo'}</span>
         </div>
       )}
 
@@ -709,7 +763,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
           Discreto, num canto, para não atrapalhar o jogo. */}
       {gamer && travado && (
         <div className="gamer-preso">
-          🎮 Modo Gamer — <b>Ctrl+Alt+Shift+G</b> para sair
+          🎮 Modo Gamer — <b>Shift+G</b> para sair
         </div>
       )}
 
@@ -1008,8 +1062,8 @@ function Toolbar({
         onClick={onToggleGamer}
         data-dica={
           gamer
-            ? 'Modo Gamer ligado: o mouse gira a mira 360° sem travar na borda. Clique na tela para prender o ponteiro; o cursor SOME enquanto joga. Para sair, aperte Ctrl+Alt+Shift+G (o cursor não alcança este botão com o ponteiro preso). Jogos com anticheat podem recusar o controle.'
-            : 'Liga o controle de jogo: o mouse vira o personagem 360°, sem parar na borda. ATENÇÃO: o cursor fica PRESO à tela e some — para desligar não dá para clicar aqui, use o atalho Ctrl+Alt+Shift+G. É o que faz jogos de tiro funcionarem pelo acesso remoto.'
+            ? 'Modo Gamer ligado: o mouse gira a mira 360° sem travar na borda. Clique na tela para prender o ponteiro; o cursor SOME enquanto joga. Para sair, aperte Shift+G (o cursor não alcança este botão com o ponteiro preso). Jogos com anticheat podem recusar o controle.'
+            : 'Liga o controle de jogo: o mouse vira o personagem 360°, sem parar na borda. ATENÇÃO: o cursor fica PRESO à tela e some — para desligar use o atalho Shift+G, não dá para clicar aqui. É o que faz jogos de tiro funcionarem pelo acesso remoto.'
         }
       >
         <IconGamepad />
