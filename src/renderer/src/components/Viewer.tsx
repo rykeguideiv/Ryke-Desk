@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatId, formatBytes } from '../../../shared/protocol';
 import { COMBOS } from '../../../shared/keymap';
 import { pointerToFraction, wheelToTicks, type Fraction } from '../lib/geometry';
-import { decidirBarra } from '../lib/barra';
+import { decidirBarra, FAIXA_COM_ABAS } from '../lib/barra';
 import type { Controller, Outgoing, State } from '../lib/controller';
 import type { Quality } from '../lib/session';
 import type { TransferView } from '../lib/files';
@@ -535,8 +535,11 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
    * abas ou a própria barra de menu. A regra em si vive em lib/barra.ts.
    */
   const revelarBarra = useCallback((e: React.PointerEvent): void => {
-    setToolbarVisible((aberta) => decidirBarra(aberta, e.clientY, e.screenY));
-  }, []);
+    // Com abas, a barra de menu fica mais abaixo (sob a barra de abas), então a
+    // faixa que a mantém aberta precisa alcançar os botões na nova posição.
+    const faixa = state.abas.length > 1 ? FAIXA_COM_ABAS : undefined;
+    setToolbarVisible((aberta) => decidirBarra(aberta, e.clientY, e.screenY, faixa));
+  }, [state.abas.length]);
 
   /** O ponteiro está travado no vídeo agora? (Modo Gamer em jogo.) */
   const jogando = (video: HTMLVideoElement): boolean =>

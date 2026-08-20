@@ -909,8 +909,20 @@ export class Controller {
       this.signaling?.send(from, { t: 'denied', reason: 'recusado' });
       return;
     }
-    if (this.hostSessions.has(from)) {
-      this.hostSessions.get(from)?.close('substituída por uma nova conexão do mesmo número');
+    // Já existe uma sessão com este número?
+    //
+    // Se ela está VIVA, este knock é repetido — a mesma conexão batendo de
+    // novo por um caminho que demorou, ou uma retentativa — e derrubar uma
+    // sessão boa por causa disso era exatamente o "substituída por uma nova
+    // conexão do mesmo número" que aparecia no meio de uma sessão que estava
+    // funcionando. Nesse caso, ignoramos o knock: quem já entrou continua.
+    //
+    // Só quando a sessão antiga está morta (o visitante caiu e volta agora) é
+    // que a substituímos de fato — aí, sim, é uma conexão nova de verdade.
+    const anterior = this.hostSessions.get(from);
+    if (anterior) {
+      if (anterior.sessaoViva) return;
+      anterior.close('substituída por uma nova conexão do mesmo número');
     }
 
     // ── acesso supervisionado: sem senha, decide quem está aqui ──

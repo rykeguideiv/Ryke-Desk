@@ -44,6 +44,17 @@ export const FAIXA_DA_BARRA = 62;
 export const FOLGA_JANELA = 10;
 
 /**
+ * Faixa maior, para quando a barra de abas empurra a barra de menu para baixo.
+ *
+ * Com duas ou mais conexões, a barra de abas ocupa o topo e a barra de menu
+ * desce para baixo dela — seus botões passam a ficar por volta de 46 a 90px do
+ * alto. Com a faixa normal de 62, descer até os botões já os "perdia": o cursor
+ * cruzava os 62px e a barra fechava antes de o clique acontecer. Esta faixa
+ * cobre a barra de abas mais a de menu inteira.
+ */
+export const FAIXA_COM_ABAS = 108;
+
+/**
  * O novo estado da barra, dado onde o cursor está.
  *
  * `screenY` entra como segunda chance para o caso de a janela estar alguns
@@ -53,9 +64,14 @@ export const FOLGA_JANELA = 10;
  * sozinho, porque num monitor posicionado ACIMA do principal o `screenY` é
  * negativo em toda a área — e a barra viveria aberta.
  */
-export function decidirBarra(aberta: boolean, clientY: number, screenY: number): boolean {
+export function decidirBarra(
+  aberta: boolean,
+  clientY: number,
+  screenY: number,
+  faixa: number = FAIXA_DA_BARRA,
+): boolean {
   if (clientY <= ENCOSTOU_NO_TOPO) return true;
   if (screenY <= 1 && clientY <= FOLGA_JANELA) return true;
-  if (clientY > FAIXA_DA_BARRA) return false;
+  if (clientY > faixa) return false;
   return aberta;
 }

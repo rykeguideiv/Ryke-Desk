@@ -22,6 +22,7 @@ import {
   decidirBarra,
   ENCOSTOU_NO_TOPO,
   FAIXA_DA_BARRA,
+  FAIXA_COM_ABAS,
   FOLGA_JANELA,
 } from '../src/renderer/src/lib/barra.ts';
 
@@ -116,6 +117,21 @@ console.log('\n── aberta, continua aberta até sair da área dela ──\n')
   }
   check('mirar uma guia vindo de baixo não abre a barra em nenhum instante',
     nunca.length === 0, nunca.length ? `abriu em ${nunca.join(', ')}` : 'nenhuma vez');
+}
+
+console.log('\n── com abas, a barra desce e a faixa acompanha ──\n');
+
+{
+  // Com duas ou mais conexões, a barra de menu fica sob a barra de abas, e
+  // seus botões ficam por volta de 46 a 90px. A faixa maior tem de mantê-la
+  // aberta enquanto o cursor desce até eles — o defeito era fechar no meio.
+  check('com abas, descer até os botões (que agora ficam mais abaixo) não fecha',
+    decidirBarra(true, 80, NA_TELA, FAIXA_COM_ABAS) === true,
+    `${80}px, dentro da faixa de ${FAIXA_COM_ABAS}`);
+  check('e na faixa normal esse mesmo ponto fecharia — era o bug',
+    decidirBarra(true, 80, NA_TELA) === false);
+  check('abaixo da barra de menu inteira, fecha',
+    decidirBarra(true, FAIXA_COM_ABAS + 1, NA_TELA, FAIXA_COM_ABAS) === false);
 }
 
 console.log(falhas === 0 ? '\nBarra da sessao validada.\n' : `\n${falhas} falha(s).\n`);
