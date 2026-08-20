@@ -113,6 +113,26 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   const [travado, setTravado] = useState(false);
   /** Diálogo que ensina o atalho de saída antes de ligar o Modo Gamer. */
   const [confirmandoGamer, setConfirmandoGamer] = useState(false);
+  /**
+   * Sensibilidade da mira no Modo Gamer.
+   *
+   * Multiplica o deslocamento do mouse antes de mandá-lo ao jogo. Existe porque
+   * o movimento atravessa a aceleração do mouse dos DOIS Windows (o seu e o do
+   * anfitrião), e o resultado chegava fraco — era preciso arrastar três vezes
+   * mais para dar um giro de 360°. Ajustável porque o valor certo depende do
+   * DPI do mouse, da sensibilidade do jogo e da resolução; guardado no aparelho.
+   */
+  const [sensGamer, setSensGamer] = useState<number>(() => {
+    const v = Number(localStorage.getItem('ryke:gamer-sens'));
+    return Number.isFinite(v) && v > 0 ? v : 3;
+  });
+  const ajustarSens = useCallback((delta: number) => {
+    setSensGamer((s) => {
+      const novo = Math.min(10, Math.max(0.5, Math.round((s + delta) * 10) / 10));
+      localStorage.setItem('ryke:gamer-sens', String(novo));
+      return novo;
+    });
+  }, []);
   /** Esc puro minimiza? Desligável para o Esc chegar ao jogo (Desativar Esc). */
   const [escMinimiza, setEscMinimiza] = useState(true);
   /** Número que acabou de conectar e ainda não foi nomeado (prompt aberto). */
@@ -526,14 +546,13 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     const video = videoRef.current;
     if (!video || !session) return;
 
-    // Modo Gamer travado: manda deslocamento, não posição. Escala pela razão
-    // entre a resolução remota e o tamanho exibido, para a sensibilidade ficar
-    // parecida com mexer o mouse direto na outra máquina.
+    // Modo Gamer travado: manda deslocamento, não posição, multiplicado pela
+    // sensibilidade. Não escala mais pela resolução: para MIRA o que importa é
+    // o movimento físico do mouse virar giro, independente do tamanho da
+    // janela — e a aceleração dos dois Windows já mexe demais no caminho.
     if (jogando(video)) {
-      const r = video.getBoundingClientRect();
-      const escala = r.width > 0 && video.videoWidth > 0 ? video.videoWidth / r.width : 1;
-      pendingRel.current.dx += e.movementX * escala;
-      pendingRel.current.dy += e.movementY * escala;
+      pendingRel.current.dx += e.movementX * sensGamer;
+      pendingRel.current.dy += e.movementY * sensGamer;
       if (rafId.current === null) rafId.current = requestAnimationFrame(flushMove);
       return;
     }
@@ -751,6 +770,15 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         <div className="gamer-aviso" onPointerDown={() => videoRef.current?.requestPointerLock?.()}>
           <strong>Modo Gamer ligado</strong>
           <span>Clique na tela para jogar — a mira gira 360°. O cursor fica preso e some.</span>
+          <div className="gamer-sens" onPointerDown={(e) => e.stopPropagation()}>
+            <span>Sensibilidade da mira</span>
+            <div className="gamer-sens-ctrl">
+              <button onClick={() => ajustarSens(-0.5)} aria-label="Diminuir sensibilidade">−</button>
+              <b>{sensGamer.toFixed(1)}×</b>
+              <button onClick={() => ajustarSens(0.5)} aria-label="Aumentar sensibilidade">+</button>
+            </div>
+            <span className="hint">Precisa arrastar muito para virar? Aumente. Girou rápido demais? Diminua.</span>
+          </div>
           <span className="gamer-saida">Para sair a qualquer momento: <b>Ctrl+G</b> · Esc {escMinimiza ? 'minimiza' : 'vai para o jogo'}</span>
         </div>
       )}
