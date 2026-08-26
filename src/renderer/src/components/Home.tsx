@@ -24,6 +24,26 @@ import { DIGITOS_NUMERO } from '../../../shared/encontro';
  * outro do lado oposto. Essa simetria é proposital — a mesma janela serve
  * para quem vai atender e para quem vai acessar, sem escolher "modo" nenhum.
  */
+/** Qual lista o painel de computadores está mostrando. */
+type AbaPainel = 'favoritos' | 'recentes' | 'recebidos';
+
+/**
+ * Conectar a um computador já conhecido, sem digitar nada.
+ *
+ * Busca a senha guardada daquele número NA HORA, em vez de reaproveitar o que
+ * estiver no campo da tela. Reaproveitar era o defeito: clicar num salvo logo
+ * depois de digitar outra senha mandava a senha errada, e o outro lado
+ * respondia "senha incorreta" sem que ninguém tivesse digitado nada.
+ *
+ * Sem senha guardada, conecta em branco — o modo de pedir autorização. É o
+ * comportamento certo: um computador salvo é um atalho, não uma chave.
+ */
+function conectarSalvo(controller: Controller, numero: string): void {
+  void controller.senhaGuardada(numero).then((guardada) => {
+    void controller.connect(numero, guardada ?? '', false);
+  });
+}
+
 export function Home({
   controller,
   state,
@@ -35,6 +55,8 @@ export function Home({
   onOpenSettings: () => void;
   onOpenPassword: () => void;
 }): React.JSX.Element {
+  /** Qual aba do painel está aberta; null = painel fechado. */
+  const [painel, setPainel] = useState<AbaPainel | null>(null);
 
   return (
     <>
@@ -61,12 +83,27 @@ export function Home({
             </span>
           </div>
           <div className="panels">
-            <MyComputer controller={controller} state={state} onOpenPassword={onOpenPassword} />
-            <ConnectTo controller={controller} state={state} />
+            <MyComputer
+              controller={controller}
+              state={state}
+              onOpenPassword={onOpenPassword}
+              onAbrirPainel={setPainel}
+            />
+            <ConnectTo controller={controller} state={state} onAbrirPainel={setPainel} />
           </div>
         </div>
       </div>
       <Footer state={state} onOpenSettings={onOpenSettings} />
+
+      {painel && (
+        <PainelComputadores
+          controller={controller}
+          state={state}
+          aba={painel}
+          setAba={setPainel}
+          onClose={() => setPainel(null)}
+        />
+      )}
     </>
   );
 }
@@ -77,10 +114,12 @@ function MyComputer({
   controller,
   state,
   onOpenPassword,
+  onAbrirPainel,
 }: {
   controller: Controller;
   state: State;
   onOpenPassword: () => void;
+  onAbrirPainel: (aba: AbaPainel) => void;
 }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
 
@@ -227,87 +266,237 @@ function MyComputer({
         </div>
       )}
 
-      <ConexoesRecebidas controller={controller} state={state} />
+      {/* Quem acessou este computador. Era uma lista aqui dentro, com rolagem
+          própria; virou um botão que abre a lista inteira numa janela.
+          O botão fica visível mesmo com a contagem em zero, de propósito: um
+          recurso que só aparece depois que algo acontece é um recurso que
+          ninguém descobre que existe. */}
+      <button className="btn ghost block ver-lista" onClick={() => onAbrirPainel('recebidos')}>
+        <IconMonitor width={15} height={15} />
+        Quem acessou este computador
+        <span className="conta-salvos">{state.recebidos.length}</span>
+      </button>
     </section>
   );
 }
 
 /**
- * Quem acessou este computador recentemente.
+ * Os computadores conhecidos, todos numa janela só.
  *
- * O espelho das "conexões recentes" do outro cartão: lá é para onde eu fui;
- * aqui é quem veio até mim. Mostra o nome, quando o número já foi salvo — e
- * dá para nomear na hora, para um número anônimo virar "Notebook da Ana" na
- * próxima vez que aparecer.
+ * O DEFEITO QUE ISTO CORRIGE
+ *
+ * Favoritos, recentes e recebidos moravam dentro dos cartões da tela inicial.
+ * São três listas que crescem sem limite, e o cartão não cresce junto — então
+ * elas ganharam uma barra de rolagem interna. O resultado é que a tela inicial
+ * tinha uma janelinha de três linhas por onde se espiava uma lista de vinte, e
+ * o resto do cartão ficava apertado por causa dela.
+ *
+ * Rolagem dentro de um cartão de 200 pixels é sintoma, não solução: significa
+ * que aquele conteúdo não cabia ali. Aqui ele tem a janela inteira, e a tela
+ * inicial recupera o espaço para o que ela precisa mostrar sempre — o número
+ * desta máquina e o campo de conectar.
+ *
+ * AS TRÊS ABAS
+ *
+ * Não é uma lista só com filtro porque as três respondem a perguntas
+ * diferentes: "quais eu guardei", "para onde eu fui" e "quem veio até mim".
+ * Misturá-las obrigaria a ler o rótulo de cada linha para saber o que se está
+ * olhando.
  */
-function ConexoesRecebidas({ controller, state }: { controller: Controller; state: State }): React.JSX.Element | null {
-  const [nomeando, setNomeando] = useState<string | null>(null);
+function PainelComputadores({
+  controller,
+  state,
+  aba,
+  setAba,
+  onClose,
+}: {
+  controller: Controller;
+  state: State;
+  aba: AbaPainel;
+  setAba: (aba: AbaPainel) => void;
+  onClose: () => void;
+}): React.JSX.Element {
+  const [renomeando, setRenomeando] = useState<string | null>(null);
   const [nome, setNome] = useState('');
-
-  if (state.recebidos.length === 0) return null;
+  const busy = state.outgoing !== null;
 
   const salvar = (): void => {
-    if (nomeando && nome.trim()) void controller.salvarFavorito(nomeando, nome);
-    setNomeando(null);
+    if (renomeando && nome.trim()) void controller.salvarFavorito(renomeando, nome);
+    setRenomeando(null);
     setNome('');
   };
 
-  return (
-    <div className="field">
-      <label>
-        Conexões recebidas
-        <span className="conta-salvos">{state.recebidos.length}</span>
-      </label>
-      <div className="recent-list">
-        {state.recebidos.map((num) => {
-          const salvo = state.favoritos.find((f) => f.numero === num)?.nome;
-          return (
-            <span key={num} className={`recent-chip ${salvo ? 'nomeado' : ''}`}>
-              {/* Informativo: não conecta de volta ao clicar (este cartão é de
-                  receber), só mostra quem foi. O número fica no title. */}
-              <span className="recent-usar recebido" title={formatId(num)}>
-                {salvo ?? formatId(num)}
-              </span>
-              <button
-                className="recent-estrela"
-                title={salvo ? 'Renomear' : 'Dar um nome a quem conectou'}
-                onClick={() => {
-                  setNomeando(num);
-                  setNome(salvo ?? '');
-                }}
-              >
-                <IconStar width={13} height={13} />
-              </button>
+  const nomeDe = (numero: string): string | undefined =>
+    state.favoritos.find((f) => f.numero === numero)?.nome;
+
+  const abrirRenome = (numero: string): void => {
+    setRenomeando(numero);
+    setNome(nomeDe(numero) ?? '');
+  };
+
+  const conectar = (numero: string): void => {
+    if (busy) return;
+    conectarSalvo(controller, numero);
+    onClose();
+  };
+
+  const abas: { id: AbaPainel; titulo: string; quantos: number }[] = [
+    { id: 'favoritos', titulo: 'Salvos', quantos: state.favoritos.length },
+    { id: 'recentes', titulo: 'Recentes', quantos: state.recent.length },
+    { id: 'recebidos', titulo: 'Acessaram este PC', quantos: state.recebidos.length },
+  ];
+
+  /** Uma linha da lista. As três abas usam a mesma, com ações diferentes. */
+  const linha = (
+    numero: string,
+    opcoes: { conectavel: boolean; removivel?: boolean },
+  ): React.JSX.Element => {
+    const salvo = nomeDe(numero);
+    return (
+      <div key={numero} className={`pc-linha ${numero === renomeando ? 'renomeando' : ''}`}>
+        <button
+          className="pc-identidade"
+          disabled={!opcoes.conectavel || busy}
+          title={opcoes.conectavel ? `Conectar a ${formatId(numero)}` : formatId(numero)}
+          onClick={() => opcoes.conectavel && conectar(numero)}
+        >
+          <span className="pc-nome">{salvo ?? formatId(numero)}</span>
+          {salvo && <span className="pc-numero">{formatId(numero)}</span>}
+          {state.comSenhaSalva.includes(numero) && (
+            <span className="pc-chave" title="Senha guardada para este computador">
+              <IconLock width={11} height={11} />
             </span>
-          );
-        })}
+          )}
+        </button>
+
+        <div className="pc-acoes">
+          {opcoes.conectavel && (
+            <button
+              className="pc-acao conectar"
+              title="Conectar agora"
+              disabled={busy}
+              onClick={() => conectar(numero)}
+            >
+              <IconSend width={14} height={14} />
+            </button>
+          )}
+          <button
+            className="pc-acao"
+            title={salvo ? 'Renomear' : 'Dar um nome a este computador'}
+            onClick={() => abrirRenome(numero)}
+          >
+            {salvo ? <IconPencil /> : <IconStar width={13} height={13} />}
+          </button>
+          {opcoes.removivel && salvo && (
+            <button
+              className="pc-acao remover"
+              title="Remover dos salvos"
+              onClick={() => void controller.removerFavorito(numero)}
+            >
+              <IconTrash />
+            </button>
+          )}
+        </div>
       </div>
-      {nomeando && (
-        <div className="input-with-action" style={{ marginTop: 8 }}>
-          <input
-            className="input"
-            autoFocus
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') salvar();
-              if (e.key === 'Escape') setNomeando(null);
-            }}
-            placeholder={`Nome para ${formatId(nomeando)}`}
-            maxLength={40}
-          />
-          <button onClick={salvar} title="Salvar">
-            <IconStar />
+    );
+  };
+
+  const listaAtual =
+    aba === 'favoritos'
+      ? state.favoritos.map((f) => f.numero)
+      : aba === 'recentes'
+        ? state.recent
+        : state.recebidos;
+
+  const vazio =
+    aba === 'favoritos'
+      ? 'Nenhum computador salvo ainda. Conecte-se a um e dê um nome a ele — doze dígitos ninguém decora.'
+      : aba === 'recentes'
+        ? 'Você ainda não se conectou a nenhum computador a partir daqui.'
+        : 'Ninguém acessou este computador ainda.';
+
+  return (
+    <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal painel-pcs">
+        <h2>Computadores</h2>
+
+        <div className="painel-abas" role="tablist">
+          {abas.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={aba === t.id}
+              className={`painel-aba ${aba === t.id ? 'ativa' : ''}`}
+              onClick={() => setAba(t.id)}
+            >
+              {t.titulo}
+              <span className="conta-salvos">{t.quantos}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* O campo de renomear fica no ALTO, e não colado na linha clicada:
+            numa lista de vinte itens, um campo que nasce no meio empurra tudo
+            para baixo e o cursor perde de vista o que estava fazendo. */}
+        {renomeando && (
+          <div className="input-with-action painel-renome">
+            <input
+              className="input"
+              autoFocus
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') salvar();
+                if (e.key === 'Escape') setRenomeando(null);
+              }}
+              placeholder={`Nome para ${formatId(renomeando)}`}
+              maxLength={40}
+            />
+            <button onClick={salvar} title="Salvar">
+              <IconStar />
+            </button>
+          </div>
+        )}
+
+        {/* A rolagem vive aqui, e só aqui: uma lista longa numa janela grande
+            é o lugar certo para ela, ao contrário de um cartão de 200px. */}
+        <div className="painel-lista">
+          {listaAtual.length === 0 ? (
+            <p className="painel-vazio">{vazio}</p>
+          ) : (
+            listaAtual.map((numero) =>
+              linha(numero, {
+                // Recebidos não conecta de volta: quem apareceu aqui foi
+                // acessar, e oferecer "conectar" ali sugeriria uma reciprocidade
+                // que não existe — o número dele pode nem aceitar conexões.
+                conectavel: aba !== 'recebidos',
+                removivel: aba === 'favoritos',
+              }),
+            )
+          )}
+        </div>
+
+        <div className="modal-actions">
+          <button className="btn primary" onClick={onClose}>
+            Fechar
           </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
 // ────────────────────── conectar a outro PC ───────────────────────
 
-function ConnectTo({ controller, state }: { controller: Controller; state: State }): React.JSX.Element {
+function ConnectTo({
+  controller,
+  state,
+  onAbrirPainel,
+}: {
+  controller: Controller;
+  state: State;
+  onAbrirPainel: (aba: AbaPainel) => void;
+}): React.JSX.Element {
   const [id, setId] = useState('');
   const [password, setPassword] = useState('');
   const [reveal, setReveal] = useState(false);
@@ -364,9 +553,7 @@ function ConnectTo({ controller, state }: { controller: Controller; state: State
   const abrirFavorito = (numero: string): void => {
     if (busy) return;
     setId(formatId(numero));
-    void controller.senhaGuardada(numero).then((guardada) => {
-      void controller.connect(numero, guardada ?? '', false);
-    });
+    conectarSalvo(controller, numero);
   };
 
   /**
@@ -385,6 +572,17 @@ function ConnectTo({ controller, state }: { controller: Controller; state: State
         : offline
           ? 'Este computador ainda está entrando na rede de encontro…'
           : null;
+
+  /**
+   * Os quatro salvos mais recentes — o que cabe numa linha sem apertar.
+   *
+   * `favoritos` já chega ordenado do mais usado para o menos (ver `usadoEm` em
+   * shared/config.ts), então cortar os quatro primeiros dá justamente os que
+   * têm chance de serem clicados.
+   */
+  const atalhos = state.favoritos.slice(0, 4);
+  /** Onde o painel abre: na aba que tem algo para mostrar. */
+  const abaInicial: AbaPainel = state.favoritos.length > 0 ? 'favoritos' : 'recentes';
 
   const submit = (): void => {
     if (busy) return;
@@ -526,109 +724,41 @@ function ConnectTo({ controller, state }: { controller: Controller; state: State
         {busy ? 'Conectando…' : supervisionado ? 'Pedir acesso' : 'Conectar'}
       </button>
 
-      {/* A ÚNICA PARTE QUE ROLA.
-          Favoritos e recentes são as duas listas que crescem sem limite —
-          eram elas que empurravam o botão de conectar para fora da tela. Aqui
-          elas ficam contidas: a lista rola dentro de si mesma e todo o resto
-          do cartão permanece onde está, sempre à vista. */}
-      <div className="listas-salvos">
-        {state.favoritos.length > 0 && (
-          <div className="field">
-            <label>
-              Favoritos
-              <span className="conta-salvos">{state.favoritos.length}</span>
-            </label>
-            <div className="favoritos">
-              {state.favoritos.map((fav) => (
-                <div
-                  key={fav.numero}
-                  className={`favorito ${fav.numero === numeroLimpo ? 'escolhido' : ''}`}
-                >
-                  {/* Um clique preenche o número; dois já conectam. Guardar um
-                      computador com nome só compensa se chegar nele for curto —
-                      preencher e ainda ter de mirar em "Conectar" desperdiçava
-                      metade do ganho de tê-lo salvo. */}
-                  <button
-                    className="favorito-abrir"
-                    onClick={() => setId(formatId(fav.numero))}
-                    onDoubleClick={() => abrirFavorito(fav.numero)}
-                    title={`${formatId(fav.numero)} — clique para usar, dois cliques para conectar`}
-                  >
-                    <span className="favorito-nome">{fav.nome}</span>
-                    <span className="favorito-num">
-                      {formatId(fav.numero)}
-                      {state.comSenhaSalva.includes(fav.numero) && (
-                        <span className="favorito-chave" title="Senha guardada para este computador">
-                          <IconLock width={11} height={11} />
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                  <button
-                    className="favorito-acao conectar"
-                    title="Conectar agora"
-                    disabled={busy}
-                    onClick={() => abrirFavorito(fav.numero)}
-                  >
-                    <IconSend width={14} height={14} />
-                  </button>
-                  <button
-                    className="favorito-acao"
-                    title="Renomear"
-                    onClick={() => {
-                      setNomeFavorito(fav.nome);
-                      setId(formatId(fav.numero));
-                      setSalvando(true);
-                    }}
-                  >
-                    <IconPencil />
-                  </button>
-                  <button
-                    className="favorito-acao remover"
-                    title="Remover dos favoritos"
-                    onClick={() => void controller.removerFavorito(fav.numero)}
-                  >
-                    <IconTrash />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+      {/* ATALHOS: os quatro computadores salvos mais recentes, numa linha só.
 
-        {state.recent.length > 0 && (
-          <div className="field">
-            <label>Conexões recentes</label>
-            <div className="recent-list">
-              {/* Recentes mostram o NOME quando o número já foi salvo — e o
-                  número quando não. Clicar preenche o número lá em cima,
-                  selecionado; a estrela guarda/renomeia, já trazendo o nome
-                  atual para editar em vez de começar do zero. */}
-              {state.recent.map((recent) => {
-                const salvo = state.favoritos.find((f) => f.numero === recent)?.nome;
-                return (
-                  <span key={recent} className={`recent-chip ${salvo ? 'nomeado' : ''}`}>
-                    <button className="recent-usar" onClick={() => setId(formatId(recent))} title={formatId(recent)}>
-                      {salvo ?? formatId(recent)}
-                    </button>
-                    <button
-                      className="recent-estrela"
-                      title={salvo ? 'Renomear' : 'Salvar nos favoritos com um nome'}
-                      onClick={() => {
-                        setId(formatId(recent));
-                        setNomeFavorito(salvo ?? '');
-                        setSalvando(true);
-                      }}
-                    >
-                      <IconStar width={13} height={13} />
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
+          Aqui estava a lista inteira de favoritos e recentes, com rolagem
+          própria dentro do cartão — e era ela que apertava tudo o mais. O
+          resto da lista foi para o painel, atrás do botão logo abaixo.
+
+          Estes quatro ficaram porque conectar a quem se usa todo dia deveria
+          custar um clique, não dois. A linha NÃO quebra e NÃO rola: a altura
+          dela é fixa, então a lista pode crescer à vontade que este cartão
+          nunca mais volta a ser empurrado para fora da tela. */}
+      {atalhos.length > 0 && (
+        <div className="field">
+          <label>Ir direto</label>
+          <div className="atalhos">
+            {atalhos.map((fav) => (
+              <button
+                key={fav.numero}
+                className={`atalho ${fav.numero === numeroLimpo ? 'escolhido' : ''}`}
+                disabled={busy}
+                title={`Conectar a ${formatId(fav.numero)}`}
+                onClick={() => abrirFavorito(fav.numero)}
+              >
+                <span className="atalho-nome">{fav.nome}</span>
+                {state.comSenhaSalva.includes(fav.numero) && <IconLock width={10} height={10} />}
+              </button>
+            ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      <button className="btn ghost block ver-lista" onClick={() => onAbrirPainel(abaInicial)}>
+        <IconStar width={15} height={15} />
+        Computadores salvos e recentes
+        <span className="conta-salvos">{state.favoritos.length + state.recent.length}</span>
+      </button>
     </section>
   );
 }

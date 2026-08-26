@@ -324,28 +324,48 @@ async function principal() {
     `(() => { const b = document.querySelector('.salvar-favorito .input-with-action button'); b.click(); return true; })()`,
   );
 
+  // O ATALHO. Favoritos e recentes saíram de dentro do cartão — cresciam sem
+  // limite e obrigavam a rolar a tela inicial. O que ficou à vista é uma linha
+  // de até quatro atalhos, de altura fixa; o resto mora no painel.
   const salvo = await visitante.esperar(
-    `(() => { const e = document.querySelector('.favorito-nome'); return e ? e.textContent : null; })()`,
+    `(() => { const e = document.querySelector('.atalho-nome'); return e ? e.textContent : null; })()`,
     8000,
   );
-  check('favorito salvo com o nome escolhido', salvo === 'PC do Ceara', salvo ?? 'nenhum');
+  check('favorito salvo aparece como atalho, com o nome escolhido', salvo === 'PC do Ceara', salvo ?? 'nenhum');
 
-  const numeroDoFavorito = await visitante.avaliar(
-    `(() => { const e = document.querySelector('.favorito-num'); return e ? e.textContent.replace(/[^0-9]/g,'') : null; })()`,
-  );
-  check('o favorito guarda o número certo', numeroDoFavorito === idAnfitriao, numeroDoFavorito ?? 'nenhum');
-
-  // Clicar no favorito precisa preencher o campo — é para isso que ele serve.
-  await visitante.avaliar(preencher('#peer-id', ''));
-  await visitante.avaliar(`(() => { document.querySelector('.favorito-abrir').click(); return true; })()`);
-  const preenchido = await visitante.esperar(
-    `(() => { const e = document.querySelector('#peer-id'); return e ? e.value.replace(/[^0-9]/g,'') : null; })()`,
+  // O PAINEL. É onde a lista inteira vive agora, com o número ao lado do nome
+  // — e não escondido num `title`, que quem vai ditar o número por telefone
+  // não descobre que existe.
+  await visitante.avaliar(clicarTexto('Computadores salvos e recentes'));
+  const noPainel = await visitante.esperar(
+    `(() => {
+       const linha = document.querySelector('.painel-lista .pc-linha');
+       if (!linha) return null;
+       const nome = linha.querySelector('.pc-nome');
+       const num = linha.querySelector('.pc-numero');
+       return { nome: nome ? nome.textContent : null, num: num ? num.textContent.replace(/[^0-9]/g, '') : null };
+     })()`,
     8000,
   );
-  check('clicar no favorito preenche o número', preenchido === idAnfitriao, preenchido ?? 'vazio');
+  check('o painel lista o computador salvo', noPainel && noPainel.nome === 'PC do Ceara',
+    noPainel ? String(noPainel.nome) : 'painel vazio');
+  check('e mostra o número junto do nome', noPainel && noPainel.num === idAnfitriao,
+    noPainel ? String(noPainel.num) : 'nenhum');
+
+  // As três abas existem e contam o que têm. Sem isso o painel seria uma lista
+  // só, e "quais eu guardei", "para onde eu fui" e "quem veio até mim" são
+  // perguntas diferentes.
+  const abas = await visitante.avaliar(
+    `[...document.querySelectorAll('.painel-aba')].map(b => b.textContent.trim())`,
+  );
+  check('o painel tem as três listas separadas', Array.isArray(abas) && abas.length === 3, String(abas));
+
+  await visitante.avaliar(clicarTexto('Fechar'));
+  await visitante.esperar(`!document.querySelector('.painel-pcs')`, 8000);
 
   // Salvar de novo o mesmo número renomeia, e não duplica: duas linhas com o
   // mesmo número seriam um convite ao engano na hora de escolher.
+  await visitante.avaliar(preencher('#peer-id', idAnfitriao));
   await visitante.avaliar(clicarTexto('Renomear'));
   await visitante.esperar(`!!document.querySelector('#fav-nome')`, 8000);
   await visitante.avaliar(preencher('#fav-nome', 'Servidor da loja'));
@@ -353,7 +373,7 @@ async function principal() {
     `(() => { document.querySelector('.salvar-favorito .input-with-action button').click(); return true; })()`,
   );
   const renomeado = await visitante.esperar(
-    `(() => { const l = document.querySelectorAll('.favorito-nome'); return l.length === 1 ? l[0].textContent : 'duplicou:' + l.length; })()`,
+    `(() => { const l = document.querySelectorAll('.atalho-nome'); return l.length === 1 ? l[0].textContent : 'duplicou:' + l.length; })()`,
     8000,
   );
   check('renomear não duplica o favorito', renomeado === 'Servidor da loja', String(renomeado));

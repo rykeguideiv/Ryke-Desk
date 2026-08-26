@@ -1362,14 +1362,7 @@ button {
   font-weight: 600;
 }
 
-.recent-chip.nomeado .recent-estrela {
-  color: var(--warn);
-}
 
-/* Item de "conexões recebidas": é informativo, não conecta ao clicar. */
-.recent-usar.recebido {
-  cursor: default;
-}
 
 .viewer.dragging::after {
   content: "Solte para enviar ao outro computador";
@@ -2035,20 +2028,6 @@ button {
 
 /* ─────────────────────────── favoritos ─────────────────────────── */
 
-/* A região que rola dentro do cartão, e só ela.
-   `min-height: 0` é o que faz um filho de flex poder encolher abaixo do
-   próprio conteúdo — sem isso a lista continuaria esticando o cartão e o
-   `overflow` nunca entraria em ação. */
-.listas-salvos {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin: 0 -6px -4px 0;
-  padding-right: 6px;
-}
 
 .conta-salvos {
   margin-left: 7px;
@@ -2060,97 +2039,18 @@ button {
   font-weight: 700;
 }
 
-.favoritos {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
 
-/* O favorito cujo número está no campo agora. Sem esta marca, clicar num
-   favorito não dava retorno nenhum: o número aparecia lá em cima e a lista
-   continuava idêntica, então não dava para ter certeza de que o clique pegou. */
-.favorito.escolhido {
-  border-color: var(--accent);
-  background: rgb(76 125 255 / 10%);
-}
 
-/* A chave diz que aquele computador entra sem digitar senha. É informação que
-   muda a expectativa antes do clique — sem ela, só se descobre ao conectar. */
-.favorito-chave {
-  display: inline-flex;
-  vertical-align: -1px;
-  margin-left: 5px;
-  color: var(--ok);
-}
 
-.favorito-acao.conectar:hover:not(:disabled) {
-  background: var(--accent);
-  color: #fff;
-}
 
-.favorito-acao:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
 
-.favorito {
-  display: flex;
-  align-items: stretch;
-  gap: 4px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  overflow: hidden;
-  transition: border-color 0.14s;
-}
 
-.favorito:hover {
-  border-color: var(--accent);
-}
 
-.favorito-abrir {
-  flex: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 9px 12px;
-  text-align: left;
-  min-width: 0;
-}
 
-.favorito-nome {
-  font-weight: 600;
-  font-size: 13.5px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
-.favorito-num {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--text-faint);
-  margin-left: auto;
-  flex-shrink: 0;
-}
 
-.favorito-acao {
-  width: 34px;
-  display: grid;
-  place-items: center;
-  color: var(--text-faint);
-  transition: color 0.14s, background 0.14s;
-}
 
-.favorito-acao:hover {
-  color: var(--text);
-  background: var(--surface-hi);
-}
 
-.favorito-acao.remover:hover {
-  color: var(--danger);
-}
 
 /* Ação discreta em forma de link, para o que é opcional. */
 .link-acao {
@@ -2362,16 +2262,7 @@ button {
   color: var(--text);
 }
 
-.recent-estrela {
-  display: grid;
-  place-items: center;
-  padding: 0 10px 0 6px;
-  color: var(--text-faint);
-}
 
-.recent-estrela:hover {
-  color: var(--warn);
-}
 
 /* O aviso contra o golpe do falso suporte, no pedido de acesso sem senha.
    Vermelho e destacado porque compete com uma voz ao telefone dizendo
@@ -2490,4 +2381,247 @@ button {
 /* E a barra de abas também. */
 .viewer.janelado .barra-abas {
   top: 30px;
+}
+
+/* ══════════════════════════ tela inicial ═══════════════════════════
+   Favoritos, recentes e recebidos saíram dos cartões e foram para o painel
+   (ver PainelComputadores em Home.tsx). O que sobrou aqui são elementos de
+   ALTURA FIXA — nenhum deles cresce com o uso, então a tela inicial não volta
+   a precisar de rolagem por mais computadores que se acumulem. */
+
+/* Os atalhos: uma linha, sempre uma linha.
+
+   `nowrap` + `overflow: hidden` é o que garante a promessa. Sem eles, cinco
+   favoritos com nomes longos quebrariam para uma segunda linha, o cartão
+   cresceria, e estaríamos de volta ao problema que este redesenho corrige. */
+.atalhos {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.atalho {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 4%);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.14s, border-color 0.14s, color 0.14s;
+}
+
+.atalho:hover:not(:disabled) {
+  background: rgb(255 255 255 / 9%);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.atalho:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.atalho.escolhido {
+  border-color: var(--accent-hi);
+  color: var(--text);
+}
+
+/* O nome encolhe com reticências em vez de empurrar os vizinhos para fora. */
+.atalho-nome {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* O botão que abre o painel. A contagem vai encostada à direita, longe do
+   rótulo, para o número não ser lido como parte do texto. */
+.ver-lista {
+  justify-content: flex-start;
+  gap: 9px;
+}
+
+.ver-lista .conta-salvos {
+  margin-left: auto;
+}
+
+/* ═════════════════════ painel de computadores ══════════════════════ */
+
+.painel-pcs {
+  max-width: 560px;
+  width: 100%;
+  /* Alto o bastante para uma lista longa valer a pena, e limitado pela janela
+     para nunca sair pela borda numa tela pequena. */
+  max-height: min(76vh, 620px);
+  display: flex;
+  flex-direction: column;
+}
+
+.painel-abas {
+  display: flex;
+  gap: 4px;
+  margin: 2px 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.painel-aba {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+
+.painel-aba:hover {
+  background: rgb(255 255 255 / 6%);
+  color: var(--text-dim);
+}
+
+.painel-aba.ativa {
+  background: rgb(255 255 255 / 9%);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.painel-renome {
+  margin-bottom: 10px;
+}
+
+/* A rolagem vive aqui — numa lista longa dentro de uma janela grande, que é
+   o lugar certo para ela. */
+.painel-lista {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.painel-vazio {
+  margin: 24px 8px;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.pc-linha {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 0;
+  border-radius: 9px;
+  transition: background 0.14s;
+}
+
+.pc-linha:hover {
+  background: rgb(255 255 255 / 5%);
+}
+
+.pc-linha.renomeando {
+  background: rgb(255 255 255 / 8%);
+  outline: 1px solid var(--accent);
+}
+
+.pc-identidade {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  height: 38px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pc-identidade:disabled {
+  cursor: default;
+}
+
+.pc-nome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* O número acompanha o nome, em vez de sumir num `title`. Quem vai ditar o
+   número por telefone precisa vê-lo sem descobrir que há um tooltip ali. */
+.pc-numero {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.pc-chave {
+  display: inline-flex;
+  align-self: center;
+  color: var(--ok);
+}
+
+.pc-acoes {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.pc-acao {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 30px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+
+.pc-acao:hover:not(:disabled) {
+  background: rgb(255 255 255 / 10%);
+  color: var(--text);
+}
+
+.pc-acao:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pc-acao.conectar:hover:not(:disabled) {
+  color: var(--accent-hi);
+}
+
+.pc-acao.remover:hover {
+  color: var(--danger);
+}
+
+.pc-acao svg {
+  width: 14px;
+  height: 14px;
 }
