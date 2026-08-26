@@ -58,6 +58,29 @@ const GetSystemMetrics = user32.func('int __stdcall GetSystemMetrics(int nIndex)
 // assinatura abaixo; a constante em si não é usada em lugar nenhum.
 koffi.struct('POINT', { x: 'long', y: 'long' });
 const GetCursorPos = user32.func('int __stdcall GetCursorPos(_Out_ POINT *p)');
+
+/**
+ * Move o cursor SEM que o jogo perceba.
+ *
+ * A diferença entre isto e `SendInput` é o que faz o Modo Gamer funcionar, e
+ * ela não é óbvia:
+ *
+ *   • `SendInput` com MOUSEEVENTF_MOVE entra na fila de entrada como se fosse
+ *     um mouse de verdade. Chega ao Raw Input, e portanto ao jogo, que vira a
+ *     câmera. É assim que o movimento do visitante vira giro.
+ *
+ *   • `SetCursorPos` apenas REPOSICIONA o ponteiro. Não gera evento de
+ *     dispositivo, não aparece no Raw Input, e o jogo não enxerga deslocamento
+ *     nenhum — para ele, nada aconteceu.
+ *
+ * É essa cegueira que nos deixa recentralizar o ponteiro a cada quadro. Sem
+ * recentralizar, o cursor caminha até a borda da tela e para ali; a partir daí
+ * o Windows não tem mais para onde movê-lo, o deslocamento vira zero e a
+ * câmera trava — que é exatamente o "precisa arrastar várias vezes para virar".
+ * Recentralizando com SendInput em vez disto, o salto de volta ao centro seria
+ * lido como movimento real e a mira giraria sozinha.
+ */
+const SetCursorPos = user32.func('int __stdcall SetCursorPos(int X, int Y)');
 const BlockInputNative = user32.func('int __stdcall BlockInput(int fBlockIt)');
 
 const INPUT_SIZE = koffi.sizeof(INPUT);
@@ -292,6 +315,16 @@ export function cursorPosition(): { x: number; y: number } | null {
   if (!GetCursorPos(p)) return null;
   if (typeof p.x !== 'number' || typeof p.y !== 'number') return null;
   return { x: p.x, y: p.y };
+}
+
+/**
+ * Reposiciona o ponteiro sem gerar evento de entrada. Ver `SetCursorPos`.
+ *
+ * Coordenadas em pixels físicos da área de trabalho virtual, como em
+ * `moveMouseTo` — e ao contrário desta, invisível para quem lê Raw Input.
+ */
+export function warpCursor(x: number, y: number): boolean {
+  return SetCursorPos(Math.round(x), Math.round(y)) !== 0;
 }
 
 export function blockLocalInput(on: boolean): boolean {

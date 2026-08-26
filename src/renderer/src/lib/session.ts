@@ -12,6 +12,7 @@ import { Vigilancia } from '../../../shared/vigilancia';
 import type { Signaling } from './signaling';
 import type { Quality } from '../../../shared/config';
 import { maiorQualidade, PERFIS_CAPTURA_SOFTWARE } from '../../../shared/qualidade-captura';
+import type { Ponteiro } from '../../../shared/ponteiros';
 
 /**
  * Uma sessão remota estabelecida, dos dois pontos de vista.
@@ -58,6 +59,21 @@ export type SessionEvents = {
    * React: quem escuta move um elemento pelo estilo, sem redesenhar a árvore.
    */
   cursor: (ponto: { x: number; y: number }) => void;
+  /**
+   * "A sua seta é esta cor, e este é o nome que vai escrito embaixo dela."
+   *
+   * Chega uma vez, logo depois de a sessão subir. É o que permite ao visitante
+   * pintar o PRÓPRIO cursor do sistema: o primeiro que entrou fica vermelho, o
+   * segundo azul, o terceiro verde.
+   */
+  cor: (cor: { indice: number; nome: string }) => void;
+  /**
+   * As setas dos OUTROS — os demais visitantes conectados ao mesmo anfitrião.
+   *
+   * Como `cursor`, chega dezenas de vezes por segundo e por isso não vira
+   * estado do React: quem escuta move elementos pelo estilo.
+   */
+  ponteiros: (lista: Ponteiro[]) => void;
   installer: (result: { ok: boolean; canceled?: boolean; message: string }) => void;
   transfers: () => void;
   closed: (reason: string) => void;
@@ -159,7 +175,8 @@ export class Session {
   remoteStream: MediaStream | null = null;
 
   private listeners: { [K in keyof SessionEvents]: SessionEvents[K][] } = {
-    stream: [], stats: [], meta: [], cursor: [], installer: [], transfers: [], closed: [], ready: [], saude: [],
+    stream: [], stats: [], meta: [], cursor: [], cor: [], ponteiros: [], installer: [], transfers: [],
+    closed: [], ready: [], saude: [],
   };
 
   constructor(role: Role, peerId: string, signaling: Signaling, iceServers: RTCIceServer[]) {
@@ -430,6 +447,8 @@ export class Session {
     if (this.role === 'visitante') {
       if (msg.t === 'meta') this.emit('meta', msg);
       if (msg.t === 'cursor') this.emit('cursor', { x: msg.x, y: msg.y });
+      if (msg.t === 'cor') this.emit('cor', { indice: msg.indice, nome: msg.nome });
+      if (msg.t === 'ponteiros') this.emit('ponteiros', msg.lista);
       if (msg.t === 'run-installer-result') {
         this.emit('installer', { ok: msg.ok, canceled: msg.canceled, message: msg.message });
       }
@@ -439,20 +458,26 @@ export class Session {
     // Daqui para baixo: só o anfitrião, e só depois de a senha ter sido aceita.
     switch (msg.t) {
       case 'mm':
-        window.ryke.input.move(msg.x, msg.y);
+        // NÃO move o cursor do Windows daqui — move a seta virtual DESTE
+        // visitante. Ver `input:move` no processo principal e o porquê inteiro
+        // em shared/ponteiros.ts.
+        window.ryke.input.move(this.peerId, msg.x, msg.y);
         break;
       case 'md':
       case 'mu':
-        window.ryke.input.button(msg.b, msg.t === 'md', msg.x, msg.y);
+        window.ryke.input.button(this.peerId, msg.b, msg.t === 'md', msg.x, msg.y);
         break;
       case 'mr':
-        window.ryke.input.moveRel(msg.dx, msg.dy);
+        window.ryke.input.moveRel(this.peerId, msg.dx, msg.dy);
+        break;
+      case 'gamer':
+        window.ryke.input.gamer(this.peerId, msg.on);
         break;
       case 'mrb':
         window.ryke.input.buttonRel(msg.b, msg.down);
         break;
       case 'wheel':
-        window.ryke.input.wheel(msg.dx, msg.dy);
+        window.ryke.input.wheel(this.peerId, msg.dx, msg.dy, msg.x, msg.y);
         break;
       case 'kd':
       case 'ku':
@@ -667,12 +692,36 @@ export class Session {
   sendCursor(x: number, y: number): void {
     this.sendRapido({ t: 'cursor', x, y });
   }
+  /**
+   * Anfitrião: "você é o visitante de número N; a sua seta é esta cor".
+   *
+   * Confiável de propósito, ao contrário das posições: uma posição perdida é
+   * corrigida pela seguinte, mas uma cor perdida deixaria o visitante pintando
+   * a própria seta de vermelho para sempre — em cima da seta de outra pessoa.
+   */
+  sendCor(indice: number, nome: string): void {
+    this.sendCtrl({ t: 'cor', indice, nome });
+  }
+  /** Anfitrião: onde estão as setas dos OUTROS visitantes. */
+  sendPonteiros(lista: Ponteiro[]): void {
+    this.sendRapido({ t: 'ponteiros', lista });
+  }
   sendMouseButton(button: 0 | 1 | 2, down: boolean, x: number, y: number): void {
     this.sendCtrl({ t: down ? 'md' : 'mu', b: button, x, y });
   }
   /** Modo Gamer: deslocamento relativo da mira (canal rápido, pode perder). */
   sendMouseRel(dx: number, dy: number): void {
     this.sendRapido({ t: 'mr', dx, dy });
+  }
+  /**
+   * Modo Gamer ligado/desligado, para o anfitrião apagar a seta deste
+   * visitante e prender o ponteiro real no centro da tela.
+   *
+   * Confiável: perder o "liguei" deixaria a mira travando na borda a partida
+   * inteira, sem nada na tela explicando o motivo.
+   */
+  sendGamer(on: boolean): void {
+    this.sendCtrl({ t: 'gamer', on });
   }
   /** Modo Gamer: clique sem reposicionar. Confiável — perder um tiro irrita. */
   sendMouseRelButton(button: 0 | 1 | 2, down: boolean): void {

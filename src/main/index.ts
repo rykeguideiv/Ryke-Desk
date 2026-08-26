@@ -9,6 +9,7 @@
  */
 import { app, BrowserWindow, ipcMain, shell, clipboard, dialog, desktopCapturer, session, powerSaveBlocker, screen } from 'electron';
 import { dirname, extname, join } from 'node:path';
+import { release } from 'node:os';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { isElevated, permitirArrastarArquivos } from './elevation';
@@ -35,6 +36,7 @@ import { copiarArquivos, lerArquivosCopiados } from './clipboard-arquivos';
 import type { Papel } from '../shared/config';
 import { SERVIDOR_PADRAO } from '../shared/servidor-padrao';
 import type { PerfilCapturaSoftware } from '../shared/qualidade-captura';
+import type { Ponteiro } from '../shared/ponteiros';
 
 // Duas cópias abertas disputariam o mesmo número Ryke na malha.
 if (!app.requestSingleInstanceLock()) {
@@ -150,15 +152,24 @@ function comecarARelatarCursor(): void {
   if (relogioCursor !== null) return;
   ultimoCursor = '';
   relogioCursor = setInterval(() => {
+    // (a) O cursor DESTE computador, para cada visitante desenhar a seta do
+    // dono da máquina — a branca, sem cor, que não obedece a ninguém de fora.
     const ponto = input.cursorPosition();
-    if (!ponto) return;
-    const fracao = toFraction(captureDisplayId, ponto.x, ponto.y);
+    const fracao = ponto ? toFraction(captureDisplayId, ponto.x, ponto.y) : null;
     // Fora da tela capturada (outro monitor): não há onde desenhar.
-    if (!fracao) return;
-    const marca = `${fracao.x.toFixed(4)},${fracao.y.toFixed(4)}`;
-    if (marca === ultimoCursor) return;
-    ultimoCursor = marca;
-    mainWindow?.webContents.send('cursor:posicao', fracao);
+    if (fracao) {
+      const marca = `${fracao.x.toFixed(4)},${fracao.y.toFixed(4)}`;
+      if (marca !== ultimoCursor) {
+        ultimoCursor = marca;
+        mainWindow?.webContents.send('cursor:posicao', fracao);
+      }
+    }
+
+    // (b) As setas virtuais dos visitantes, para a interface repassar a cada
+    // um as dos OUTROS. Vinte vezes por segundo é o bastante: a própria seta
+    // cada um desenha localmente, sem passar por aqui e sem atraso; estas são
+    // as alheias, e para elas o olho não distingue 20 de 60.
+    if (ponteiros.size > 0) mainWindow?.webContents.send('ponteiros:estado', ponteirosParaVisitantes());
   }, INTERVALO_CURSOR_MS);
 }
 
@@ -166,6 +177,269 @@ function pararDeRelatarCursor(): void {
   if (relogioCursor === null) return;
   clearInterval(relogioCursor);
   relogioCursor = null;
+}
+
+// ──────────────────────── as setas da sessão ──────────────────────
+//
+// O Windows tem UM ponteiro. Enquanto o movimento do visitante ia direto para
+// o SendInput, esse ponteiro único era disputado: quem estava sentado aqui via
+// a seta fugir da mão, e com dois visitantes eram três mãos num mouse só.
+//
+// Agora cada visitante tem uma seta VIRTUAL — desenho, e nada além disso. Ela
+// mora na camada transparente logo abaixo, anda sozinha e não encosta no
+// cursor do sistema. O cursor real continua sendo de quem está aqui; ele só é
+// EMPRESTADO no instante de um clique, e devolvido ao lugar em seguida.
+
+/** Uma seta virtual viva agora, em fração da tela capturada. */
+type PonteiroVivo = { nome: string; cor: number; x: number; y: number };
+
+const ponteiros = new Map<string, PonteiroVivo>();
+let janelaSetas: BrowserWindow | null = null;
+
+function setasIndependentes(): boolean {
+  // Ausente = ligado. Quem atualiza de uma versão antiga não tinha a chave
+  // gravada, e nascer desligado devolveria justamente o defeito.
+  return store?.getSettings().setasIndependentes !== false;
+}
+
+/**
+ * A camada só existe onde o Windows sabe escondê-la da captura.
+ *
+ * `setContentProtection` usa `SetWindowDisplayAffinity`. A partir do Windows 10
+ * 2004 (build 19041) existe WDA_EXCLUDEFROMCAPTURE, que torna a janela
+ * invisível para quem grava a tela — exatamente o que queremos: as setas são
+ * para quem está AQUI, e o visitante desenha as dele localmente, sem atraso.
+ *
+ * Nas versões anteriores só existe WDA_MONITOR, que não esconde: pinta de
+ * PRETO na captura. Uma janela do tamanho da tela viraria um retângulo preto
+ * cobrindo o vídeo inteiro. Diante disso, preferimos não abrir a camada: quem
+ * está no anfitrião deixa de ver as setas dos visitantes, e todo o resto —
+ * inclusive a independência dos ponteiros — continua funcionando.
+ */
+function podeEsconderDaCaptura(): boolean {
+  const build = Number(release().split('.')[2] ?? 0);
+  return process.platform === 'win32' && build >= 19041;
+}
+
+function abrirCamadaDeSetas(): void {
+  if (janelaSetas && !janelaSetas.isDestroyed()) return;
+  if (!podeEsconderDaCaptura()) return;
+
+  const alvo = findDisplay(captureDisplayId);
+  janelaSetas = new BrowserWindow({
+    ...alvo.bounds,
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    // Nunca rouba o foco de nada. Uma janela sempre-no-topo que aceita foco
+    // roubaria o clique do próprio programa que o visitante está tentando usar.
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    acceptFirstMouse: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/ponteiros.js'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      // A camada redesenha a cada movimento do mouse do outro lado; em segundo
+      // plano o Chromium estrangula os timers e ela andaria aos solavancos.
+      backgroundThrottling: false,
+    },
+  });
+
+  // O mouse atravessa: a camada desenha e mais nada. Sem isto ela engoliria
+  // todo clique da máquina, que é o pior defeito possível numa janela que
+  // cobre a tela inteira.
+  janelaSetas.setIgnoreMouseEvents(true, { forward: false });
+  janelaSetas.setAlwaysOnTop(true, 'screen-saver');
+  janelaSetas.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  janelaSetas.setContentProtection(true);
+
+  janelaSetas.on('closed', () => {
+    janelaSetas = null;
+  });
+
+  const url = process.env.ELECTRON_RENDERER_URL;
+  if (url) void janelaSetas.loadURL(url + '/ponteiros.html');
+  else void janelaSetas.loadFile(join(__dirname, '../renderer/ponteiros.html'));
+
+  janelaSetas.once('ready-to-show', () => {
+    // showInactive, e não show: mostrar normalmente traria o foco para uma
+    // janela vazia e tiraria o cursor de onde o usuário estava trabalhando.
+    janelaSetas?.showInactive();
+    desenharSetas();
+  });
+}
+
+/**
+ * A lista para a CAMADA desta máquina: todo mundo, com quem está jogando
+ * marcado como oculto.
+ *
+ * Marcado, e não removido. A camada usa esta lista para duas coisas — desenhar
+ * as setas e montar a tarja de "este computador está sendo controlado" — e as
+ * duas têm regras opostas: a seta de quem está no Modo Gamer não deve
+ * aparecer, mas a pessoa continua controlando esta máquina e precisa continuar
+ * na tarja. Remover aqui transformaria o Modo Gamer num botão de
+ * invisibilidade, que é o oposto do que um programa de acesso remoto deve ter.
+ */
+function ponteirosDaCamada(): Ponteiro[] {
+  return [...ponteiros.entries()].map(([id, p]) => ({
+    id,
+    nome: p.nome,
+    cor: p.cor,
+    x: p.x,
+    y: p.y,
+    oculta: emModoGamer.has(id),
+  }));
+}
+
+/**
+ * A lista para os OUTROS VISITANTES: só as setas que fazem sentido desenhar.
+ *
+ * Aqui filtrar é o certo. Um visitante não tem por que ver a seta parada de
+ * quem entrou no Modo Gamer, e a tarja de aviso não é assunto dele — ela
+ * existe para quem está sentado na máquina controlada.
+ */
+function ponteirosParaVisitantes(): Ponteiro[] {
+  return ponteirosDaCamada().filter((p) => !p.oculta);
+}
+
+function fecharCamadaDeSetas(): void {
+  if (!janelaSetas || janelaSetas.isDestroyed()) {
+    janelaSetas = null;
+    return;
+  }
+  janelaSetas.destroy();
+  janelaSetas = null;
+}
+
+/** Reencaixa a camada no monitor que está sendo capturado agora. */
+function reencaixarCamadaDeSetas(): void {
+  if (!janelaSetas || janelaSetas.isDestroyed()) return;
+  janelaSetas.setBounds(findDisplay(captureDisplayId).bounds);
+}
+
+function desenharSetas(): void {
+  if (!janelaSetas || janelaSetas.isDestroyed()) return;
+  const lista = ponteirosDaCamada();
+  janelaSetas.webContents.send('ponteiros:desenhar', lista);
+}
+
+// ── o empréstimo do cursor real ──
+//
+// Mover a seta não move o cursor do Windows. Clicar precisa mover: não existe
+// "clicar ali" sem o ponteiro estar ali — o Windows entrega o clique a quem
+// estiver embaixo dele. Então pegamos o cursor emprestado pelo tempo do
+// clique, guardamos onde ele estava e o devolvemos.
+//
+// Arrastar é a exceção que confirma a regra: enquanto o botão está apertado, o
+// cursor fica com o visitante, porque um arrasto que larga o ponteiro no meio
+// do caminho não arrasta nada.
+
+/** Botões que cada visitante está segurando agora. */
+const botoesSegurados = new Map<string, Set<number>>();
+/** Para onde o cursor volta quando o clique acaba, e de quem é o empréstimo. */
+let emprestimo: { dono: string; volta: { x: number; y: number } } | null = null;
+/** O último ponto que NÓS injetamos — a régua para saber se alguém mexeu. */
+let ultimoInjetado: { x: number; y: number } | null = null;
+let devolucaoAgendada: NodeJS.Timeout | null = null;
+
+/** Rolagem contínua não pode devolver o cursor entre um tique e o outro. */
+const ESPERA_DEVOLUCAO_MS = 400;
+
+function moverCursorReal(ponto: { x: number; y: number }): void {
+  input.moveMouseTo(ponto.x, ponto.y);
+  ultimoInjetado = ponto;
+}
+
+function pegarCursorEmprestado(peerId: string, ponto: { x: number; y: number }): void {
+  if (devolucaoAgendada) {
+    clearTimeout(devolucaoAgendada);
+    devolucaoAgendada = null;
+  }
+  // Só o PRIMEIRO a pegar registra o ponto de volta. Se um segundo visitante
+  // clicar no meio do clique do primeiro, o cursor ainda tem de voltar para
+  // onde o dono da máquina o deixou — e não para onde o primeiro visitante
+  // estava apontando.
+  if (!emprestimo) emprestimo = { dono: peerId, volta: input.cursorPosition() ?? ponto };
+  moverCursorReal(ponto);
+}
+
+function devolverCursor(peerId: string, agora: boolean): void {
+  if (!emprestimo || emprestimo.dono !== peerId) return;
+  if (!agora) {
+    if (devolucaoAgendada) clearTimeout(devolucaoAgendada);
+    devolucaoAgendada = setTimeout(() => {
+      devolucaoAgendada = null;
+      devolverCursor(peerId, true);
+    }, ESPERA_DEVOLUCAO_MS);
+    return;
+  }
+
+  const { volta } = emprestimo;
+  emprestimo = null;
+  if (devolucaoAgendada) {
+    clearTimeout(devolucaoAgendada);
+    devolucaoAgendada = null;
+  }
+
+  // Se o cursor não está mais onde deixamos, quem o moveu foi a pessoa daqui —
+  // com a mão dela, no mouse dela. Devolvê-lo ao ponto antigo arrancaria o
+  // ponteiro da mão de quem está trabalhando, que é o defeito original.
+  const agoraOnde = input.cursorPosition();
+  if (agoraOnde && ultimoInjetado) {
+    const mexeram = Math.abs(agoraOnde.x - ultimoInjetado.x) > 2 || Math.abs(agoraOnde.y - ultimoInjetado.y) > 2;
+    if (mexeram) return;
+  }
+  moverCursorReal(volta);
+}
+
+function segurandoBotao(peerId: string): boolean {
+  return (botoesSegurados.get(peerId)?.size ?? 0) > 0;
+}
+
+// ── o Modo Gamer, do lado do anfitrião ──
+
+/** Quem está jogando agora. Enquanto estiver aqui, não desenhamos seta. */
+const emModoGamer = new Set<string>();
+
+/**
+ * O centro da tela capturada, em pixels físicos — o poste ao qual o ponteiro
+ * fica amarrado enquanto alguém joga.
+ */
+function centroDaTela(): { x: number; y: number } {
+  return toPhysicalPoint(captureDisplayId, 0.5, 0.5);
+}
+
+/**
+ * Devolve o ponteiro ao centro, sem o jogo perceber.
+ *
+ * Chamado depois de CADA rajada de movimento relativo. Parece exagero e não é:
+ * é a diferença entre uma mira que gira 360° sem fim e uma que trava assim que
+ * o ponteiro invisível encosta na borda do monitor. Como usa `warpCursor`
+ * (SetCursorPos), o salto de volta não entra no Raw Input e o jogo não o
+ * enxerga — ele só vê o deslocamento que mandamos de propósito.
+ */
+function recentralizarParaOJogo(): void {
+  const centro = centroDaTela();
+  input.warpCursor(centro.x, centro.y);
+  ultimoInjetado = centro;
+}
+
+/** Anota onde a seta deste visitante está e repinta a camada. */
+function registrarPonteiro(peerId: string, fx: number, fy: number): void {
+  const atual = ponteiros.get(peerId);
+  if (!atual) return;
+  atual.x = Math.min(Math.max(fx, 0), 1);
+  atual.y = Math.min(Math.max(fy, 0), 1);
+  desenharSetas();
 }
 
 // ─────────────────────────── janela ───────────────────────────────
@@ -297,6 +571,7 @@ function installDisplayChangeHandler(): void {
     displayChangeTimer = setTimeout(() => {
       displayChangeTimer = null;
       captureDisplayId = findDisplay(captureDisplayId).id;
+      reencaixarCamadaDeSetas();
       send('screen:changed');
     }, 700);
   };
@@ -733,24 +1008,107 @@ function registerIpc(): void {
   });
 
   // ── injeção de entrada (só o anfitrião chama) ──
-  ipcMain.on('input:move', (_e, fx: number, fy: number) => {
+
+  /**
+   * O visitante mexeu o mouse.
+   *
+   * Com as setas independentes — o padrão —, isto move a seta VIRTUAL dele e
+   * mais nada: o cursor do Windows daqui fica onde estava, na mão de quem está
+   * sentado nesta cadeira. A exceção é o arrasto: enquanto o visitante segura
+   * um botão, o cursor real vai junto, porque soltar o ponteiro no meio de um
+   * arrasto não arrasta coisa nenhuma.
+   */
+  ipcMain.on('input:move', (_e, peerId: string, fx: number, fy: number) => {
     const point = toPhysicalPoint(captureDisplayId, fx, fy);
-    input.moveMouseTo(point.x, point.y);
+    if (!setasIndependentes()) {
+      input.moveMouseTo(point.x, point.y);
+      return;
+    }
+    registrarPonteiro(peerId, fx, fy);
+    if (segurandoBotao(peerId)) moverCursorReal(point);
   });
 
-  ipcMain.on('input:button', (_e, button: 0 | 1 | 2, down: boolean, fx: number, fy: number) => {
+  /**
+   * Clique: o único momento em que o cursor real é emprestado.
+   *
+   * O Windows entrega o clique a quem estiver EMBAIXO do ponteiro — não existe
+   * clicar num lugar sem estar nele. Então levamos o cursor até a seta virtual,
+   * clicamos, e no soltar do último botão ele volta para onde estava.
+   */
+  ipcMain.on('input:button', (_e, peerId: string, button: 0 | 1 | 2, down: boolean, fx: number, fy: number) => {
     // Move antes de clicar: um pacote de movimento perdido não pode fazer o
     // clique cair no lugar errado.
     const point = toPhysicalPoint(captureDisplayId, fx, fy);
-    input.moveMouseTo(point.x, point.y);
-    input.mouseButton(button, down);
+    if (!setasIndependentes()) {
+      input.moveMouseTo(point.x, point.y);
+      input.mouseButton(button, down);
+      return;
+    }
+
+    registrarPonteiro(peerId, fx, fy);
+    let segurados = botoesSegurados.get(peerId);
+    if (!segurados) {
+      segurados = new Set();
+      botoesSegurados.set(peerId, segurados);
+    }
+
+    if (down) {
+      segurados.add(button);
+      pegarCursorEmprestado(peerId, point);
+      input.mouseButton(button, true);
+      return;
+    }
+
+    // Soltar primeiro, devolver depois: devolver antes faria o "soltar" cair
+    // no ponto de origem, e um arrasto terminaria onde começou.
+    input.mouseButton(button, false);
+    segurados.delete(button);
+    if (segurados.size === 0) devolverCursor(peerId, true);
+  });
+
+  /**
+   * O visitante entrou ou saiu do Modo Gamer.
+   *
+   * Entrar faz duas coisas: apaga a seta virtual dele (num jogo quem desenha a
+   * mira é o jogo) e prende o ponteiro real no centro da tela, que é o que
+   * permite girar sem fim. Sair devolve a seta.
+   */
+  ipcMain.on('input:gamer', (_e, peerId: string, on: boolean) => {
+    if (on) {
+      emModoGamer.add(peerId);
+      recentralizarParaOJogo();
+    } else {
+      emModoGamer.delete(peerId);
+    }
+    desenharSetas();
   });
 
   // Modo Gamer: deslocamento relativo (mira 360°) e clique sem reposicionar.
-  ipcMain.on('input:moveRel', (_e, dx: number, dy: number) => input.moveMouseRelative(dx, dy));
+  // Fica de fora do empréstimo de propósito: ali o ponteiro do visitante está
+  // preso e o jogo lê deslocamento, não posição — não há seta para desenhar.
+  ipcMain.on('input:moveRel', (_e, peerId: string, dx: number, dy: number) => {
+    input.moveMouseRelative(dx, dy);
+    // E, logo depois, de volta ao centro — invisível para o jogo. Sem isto o
+    // ponteiro caminha até a borda e a câmera para de girar ali.
+    if (emModoGamer.has(peerId)) recentralizarParaOJogo();
+  });
   ipcMain.on('input:buttonRel', (_e, button: 0 | 1 | 2, down: boolean) => input.mouseButton(button, down));
 
-  ipcMain.on('input:wheel', (_e, dx: number, dy: number) => input.mouseWheel(dx, dy));
+  /**
+   * A roda também precisa do cursor: o Windows rola a janela que está embaixo
+   * dele. A devolução é agendada, e não imediata, porque rolar é uma rajada de
+   * tiques — devolver entre um e outro faria o cursor tremer de ida e volta.
+   */
+  ipcMain.on('input:wheel', (_e, peerId: string, dx: number, dy: number, fx: number, fy: number) => {
+    if (!setasIndependentes()) {
+      input.mouseWheel(dx, dy);
+      return;
+    }
+    registrarPonteiro(peerId, fx, fy);
+    pegarCursorEmprestado(peerId, toPhysicalPoint(captureDisplayId, fx, fy));
+    input.mouseWheel(dx, dy);
+    if (!segurandoBotao(peerId)) devolverCursor(peerId, false);
+  });
   ipcMain.on('input:key', (_e, code: string, down: boolean) => input.key(code, down));
   ipcMain.on('input:combo', (_e, codes: string[]) => input.combo(codes));
   ipcMain.on('input:text', (_e, text: string) => input.typeText(text));
@@ -862,6 +1220,40 @@ function registerIpc(): void {
   // Modo Gamer: enquanto ligado, o Esc puro deixa de minimizar e vai ao jogo.
   ipcMain.on('teclado:escMinimiza', (_e, on: boolean) => tecladoGlobal.definirEscMinimiza(on));
 
+  /**
+   * "Janela": tira a sessão da tela cheia e a devolve a um retângulo.
+   *
+   * O visualizador nasce maximizado, e essa era a única forma que ele tinha —
+   * quem quisesse olhar a tela remota ao lado de um documento daqui não tinha
+   * para onde ir. Este botão o encolhe para METADE do monitor, centralizado.
+   *
+   * Metade, e não um tamanho decorado: é grande o bastante para a tela remota
+   * continuar legível e pequeno o bastante para sobrar espaço de cada lado.
+   * Daí em diante quem manda no tamanho é o usuário — a janela é
+   * redimensionável, e basta arrastar qualquer borda ou canto.
+   */
+  ipcMain.on('window:janela', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false);
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+
+    // A área de TRABALHO, não a do monitor: encaixar sobre a barra de tarefas
+    // esconderia justamente a borda de baixo, que é uma das alças de arrasto.
+    const area = screen.getDisplayNearestPoint(mainWindow.getBounds()).workArea;
+    const largura = Math.max(mainWindow.getMinimumSize()[0], Math.round(area.width / 2));
+    const altura = Math.max(mainWindow.getMinimumSize()[1], Math.round(area.height / 2));
+    mainWindow.setBounds({
+      x: Math.round(area.x + (area.width - largura) / 2),
+      y: Math.round(area.y + (area.height - altura) / 2),
+      width: largura,
+      height: altura,
+    });
+    // Uma janela que voltou de tela cheia sem poder ser redimensionada seria
+    // uma armadilha: o usuário veria as bordas e elas não responderiam.
+    mainWindow.setResizable(true);
+    send('window:state', windowState());
+  });
+
   ipcMain.on('window:viewer', (_e, on: boolean) => {
     if (!mainWindow) return;
     mainWindow.setMenuBarVisibility(false);
@@ -884,8 +1276,42 @@ function registerIpc(): void {
   ipcMain.on('sessao:visitantes', (_e, quantos: number) => {
     visitantesConectados = Math.max(0, Math.floor(quantos));
     send('senha:travada', visitantesConectados > 0);
-    if (visitantesConectados > 0) comecarARelatarCursor();
-    else pararDeRelatarCursor();
+    if (visitantesConectados > 0) {
+      comecarARelatarCursor();
+    } else {
+      pararDeRelatarCursor();
+      // Sem ninguém conectado não há seta para desenhar, e uma janela sempre
+      // no topo cobrindo a tela inteira não é coisa que se deixe aberta "por
+      // via das dúvidas".
+      ponteiros.clear();
+      botoesSegurados.clear();
+      emModoGamer.clear();
+      emprestimo = null;
+      fecharCamadaDeSetas();
+    }
+  });
+
+  // ── as setas dos visitantes ──
+
+  /**
+   * Um visitante entrou: reserve a seta dele, com a cor e o nome que a
+   * interface já escolheu, e abra a camada se ela ainda não estiver de pé.
+   */
+  ipcMain.on('ponteiros:entrar', (_e, peerId: string, nome: string, cor: number) => {
+    const anterior = ponteiros.get(peerId);
+    ponteiros.set(peerId, { nome, cor, x: anterior?.x ?? 0.5, y: anterior?.y ?? 0.5 });
+    if (setasIndependentes()) abrirCamadaDeSetas();
+    desenharSetas();
+  });
+
+  ipcMain.on('ponteiros:sair', (_e, peerId: string) => {
+    ponteiros.delete(peerId);
+    botoesSegurados.delete(peerId);
+    emModoGamer.delete(peerId);
+    // Quem sai segurando um botão deixaria o cursor emprestado para sempre.
+    if (emprestimo?.dono === peerId) devolverCursor(peerId, true);
+    if (ponteiros.size === 0) fecharCamadaDeSetas();
+    else desenharSetas();
   });
 
   // ── sessão ativa: impede a tela de apagar no meio de um atendimento ──
@@ -945,6 +1371,7 @@ app.on('before-quit', () => {
   querCapturarTeclado = false;
   ligarCapturaDeTeclado(false);
   pararDeRelatarCursor();
+  fecharCamadaDeSetas();
   if (input.isLocalInputBlocked()) input.blockLocalInput(false);
   transfers?.closeAll();
   if (sleepBlocker !== null) powerSaveBlocker.stop(sleepBlocker);

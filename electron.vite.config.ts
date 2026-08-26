@@ -27,7 +27,13 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     define: { __RYKE_SERVIDOR__: SERVIDOR_PADRAO },
     build: {
-      rollupOptions: { input: { index: resolve(__dirname, 'src/preload/index.ts') } },
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          // Ponte separada, e mínima, da camada de setas. Ver src/preload/ponteiros.ts.
+          ponteiros: resolve(__dirname, 'src/preload/ponteiros.ts'),
+        },
+      },
     },
   },
   renderer: {
@@ -38,7 +44,14 @@ export default defineConfig({
     plugins: [react()],
     define: { __RYKE_SERVIDOR__: SERVIDOR_PADRAO },
     build: {
-      rollupOptions: { input: { index: resolve(__dirname, 'src/renderer/index.html') } },
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          // A camada transparente de setas que fica por cima da tela do
+          // anfitrião — janela própria, página própria, sem React.
+          ponteiros: resolve(__dirname, 'src/renderer/ponteiros.html'),
+        },
+      },
     },
   },
 });

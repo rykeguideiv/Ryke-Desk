@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatId, formatBytes } from '../../../shared/protocol';
 import { COMBOS } from '../../../shared/keymap';
 import { pointerToFraction, wheelToTicks, type Fraction } from '../lib/geometry';
+import { corDoPonteiro, cursorCssDaSeta, svgDaSeta, type Ponteiro } from '../../../shared/ponteiros';
 import { decidirBarra, FAIXA_COM_ABAS } from '../lib/barra';
 import type { Controller, Outgoing, State } from '../lib/controller';
 import type { Quality } from '../lib/session';
 import type { TransferView } from '../lib/files';
 import {
-  IconMonitor, IconKeyboard, IconFiles, IconFullscreen, IconExitFullscreen,
+  IconMonitor, IconKeyboard, IconFiles, IconFullscreen, IconExitFullscreen, IconJanela,
   IconPower, IconGrip, IconX, IconArrowUp, IconArrowDown, IconFolder, IconLock, IconSend,
   IconMinus, IconShield, IconPlus, IconGamepad, IconEscape,
 } from './icons';
@@ -128,7 +129,11 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   });
   const ajustarSens = useCallback((delta: number) => {
     setSensGamer((s) => {
-      const novo = Math.min(10, Math.max(0.5, Math.round((s + delta) * 10) / 10));
+      // Teto alto de propósito. O movimento atravessa a aceleração de dois
+      // Windows, e mesmo com a mira já não travando na borda há mouse de DPI
+      // baixo que precisa de muito mais do que 10× para dar a volta completa
+      // com um arrasto só.
+      const novo = Math.min(25, Math.max(0.5, Math.round((s + delta) * 10) / 10));
       localStorage.setItem('ryke:gamer-sens', String(novo));
       return novo;
     });
@@ -260,6 +265,26 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     document.addEventListener('pointerlockchange', aoMudar);
     return () => document.removeEventListener('pointerlockchange', aoMudar);
   }, []);
+
+  /**
+   * Conta ao anfitrião que estamos jogando.
+   *
+   * Amarrado à trava do ponteiro, e não ao botão do Modo Gamer, porque é a
+   * trava que define o estado real: com o modo ligado mas o ponteiro solto
+   * (Alt+Tab, foco perdido) a pessoa está de volta ao computador dela, e a
+   * seta precisa reaparecer do outro lado.
+   *
+   * Do lado de lá, isto apaga a seta virtual deste visitante — num jogo quem
+   * desenha a mira é o jogo — e prende o ponteiro real no centro da tela, que
+   * é o que impede a câmera de travar ao encostar na borda.
+   */
+  useEffect(() => {
+    if (!session) return;
+    session.sendGamer(travado);
+    // Soltar ao desmontar: sair da aba com o modo ligado deixaria o anfitrião
+    // achando que o jogo continua, sem seta e com o ponteiro preso no centro.
+    return () => session.sendGamer(false);
+  }, [session, travado]);
 
   useEffect(() => {
     if (!session) return;
@@ -439,67 +464,136 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     };
   }, [session, capturaTotal, pausarCaptura]);
 
-  // ── as duas setas ──
+  // ── as setas ──
   //
-  // A SUA é o cursor do próprio Windows desta máquina, pintado de vermelho por
-  // um cursor personalizado no CSS. Continua instantâneo — quem o desenha é o
-  // sistema, não a página — e a cor é o que deixa claro, à primeira vista,
-  // qual das duas obedece à sua mão.
+  // Numa sessão com três pessoas há três setas na tela, e a regra que as
+  // distingue é sempre a mesma:
   //
-  // A DELES é esta marca: a posição real do ponteiro de lá, que o anfitrião
-  // informa pelo canal rápido, no desenho claro e padrão. A seta que vem
-  // dentro do vídeo não serve para nada disso, porque chega com o atraso da
-  // imagem.
+  //   • A SUA é o cursor do próprio Windows DESTA máquina, trocado por um
+  //     desenho colorido com o seu nome embaixo. Vermelho para quem conectou
+  //     primeiro, azul para o segundo, verde para o terceiro. Continua sendo o
+  //     cursor do sistema, então continua instantâneo: quem o move é o
+  //     Windows, não esta página, e nenhum quadro de atraso se interpõe entre
+  //     a sua mão e o que você vê.
   //
-  // As duas andam de forma independente, mas há um detalhe físico que a
-  // interface precisa respeitar: o computador remoto tem UM ponteiro só, e
-  // enquanto você o dirige a posição que volta de lá é a sua própria. Nesse
-  // caso mostramos apenas a sua. A marca deles reaparece assim que as duas
-  // posições se descolam — o instante exato em que a pessoa que está lá pegou
-  // o mouse dela e passou a mexer por conta própria.
+  //   • A DO ANFITRIÃO é a branca, sem cor nenhuma — é justamente a ausência
+  //     de cor que a identifica. Ela obedece só a quem está sentado lá, e a
+  //     posição vem pelo canal rápido, lida do Windows de lá.
+  //
+  //   • AS DOS OUTROS VISITANTES são coloridas como a sua, com o nome de cada
+  //     um, e chegam na mesma mensagem.
+  //
+  // A seta desenhada DENTRO do vídeo não serve para nada disso: chega com o
+  // atraso da imagem, e ver o ponteiro responder meio segundo depois da mão
+  // torna qualquer trabalho fino insuportável.
   const marcaRef = useRef<HTMLDivElement>(null);
   const cursorRemoto = useRef<Fraction>({ x: 0.5, y: 0.5 });
   /** Último ponto que ESTA máquina mandou — a régua para saber quem mexeu. */
   const lastPoint = useRef<Fraction>({ x: 0.5, y: 0.5 });
 
-  const posicionarMarca = useCallback(() => {
-    const marca = marcaRef.current;
+  /** Quem é você nesta sessão: a cor da sua seta e o nome escrito nela. */
+  const [minhaCor, setMinhaCor] = useState<{ indice: number; nome: string } | null>(null);
+  /** As setas dos DEMAIS visitantes. Estado, porque entram e saem devagar. */
+  const [outrasSetas, setOutrasSetas] = useState<Ponteiro[]>([]);
+  /** Onde cada uma está agora — fora do estado, porque muda 60 vezes por segundo. */
+  const posicoesOutras = useRef(new Map<string, Fraction>());
+  const refsOutras = useRef(new Map<string, HTMLDivElement>());
+
+  /**
+   * De fração da tela remota para pixel dentro desta janela.
+   *
+   * O vídeo é desenhado com `object-fit: contain`, então sobra faixa preta de
+   * um dos lados e a imagem não ocupa o elemento inteiro. Sem descontar essa
+   * faixa, toda seta apareceria deslocada — e o erro cresce quanto mais a
+   * proporção da janela diferir da proporção da tela remota.
+   */
+  const ondeNaTela = useCallback((ponto: Fraction): { x: number; y: number } | null => {
     const video = videoRef.current;
     const palco = containerRef.current;
-    if (!marca || !video || !palco) return;
+    if (!video || !palco) return null;
     const r = video.getBoundingClientRect();
     const { videoWidth, videoHeight } = video;
-    if (!videoWidth || !videoHeight || r.width === 0) return;
+    if (!videoWidth || !videoHeight || r.width === 0) return null;
     const escala = Math.min(r.width / videoWidth, r.height / videoHeight);
     const largura = videoWidth * escala;
     const altura = videoHeight * escala;
-    const esquerda = r.left + (r.width - largura) / 2;
-    const topo = r.top + (r.height - altura) / 2;
     const p = palco.getBoundingClientRect();
-    const x = esquerda + cursorRemoto.current.x * largura - p.left;
-    const y = topo + cursorRemoto.current.y * altura - p.top;
-    marca.style.transform = `translate(${x}px, ${y}px)`;
+    return {
+      x: r.left + (r.width - largura) / 2 + ponto.x * largura - p.left,
+      y: r.top + (r.height - altura) / 2 + ponto.y * altura - p.top,
+    };
   }, []);
+
+  const posicionarMarca = useCallback(() => {
+    const marca = marcaRef.current;
+    if (marca) {
+      const onde = ondeNaTela(cursorRemoto.current);
+      if (onde) marca.style.transform = `translate(${onde.x}px, ${onde.y}px)`;
+    }
+    for (const [id, el] of refsOutras.current) {
+      const ponto = posicoesOutras.current.get(id);
+      if (!ponto) continue;
+      const onde = ondeNaTela(ponto);
+      if (onde) el.style.transform = `translate(${onde.x}px, ${onde.y}px)`;
+    }
+  }, [ondeNaTela]);
 
   useEffect(() => {
     if (!session) return;
-    const solta = session.on('cursor', (ponto) => {
-      cursorRemoto.current = ponto;
-      // Perto o bastante do último ponto que ESTA máquina mandou significa que
-      // o ponteiro de lá está apenas obedecendo a você. A folga é generosa de
-      // propósito: o anfitrião arredonda a fração em quatro casas e o Windows
-      // encaixa o ponteiro no pixel, então "o mesmo lugar" nunca bate exato.
-      const meu = lastPoint.current;
-      const juntos = Math.abs(ponto.x - meu.x) < 0.012 && Math.abs(ponto.y - meu.y) < 0.012;
-      marcaRef.current?.classList.toggle('propria', juntos);
-      posicionarMarca();
-    });
+    const soltas = [
+      session.on('cursor', (ponto) => {
+        cursorRemoto.current = ponto;
+        posicionarMarca();
+      }),
+      session.on('cor', (cor) => setMinhaCor(cor)),
+      session.on('ponteiros', (lista) => {
+        for (const p of lista) posicoesOutras.current.set(p.id, { x: p.x, y: p.y });
+        // A lista só vira estado quando MUDA de composição — alguém entrou,
+        // alguém saiu, alguém trocou de nome. Redesenhar a árvore do React
+        // vinte vezes por segundo para mover dois elementos seria pagar caro
+        // por algo que uma linha de `transform` resolve.
+        setOutrasSetas((antes) => {
+          const igual =
+            antes.length === lista.length &&
+            antes.every((a, i) => a.id === lista[i].id && a.cor === lista[i].cor && a.nome === lista[i].nome);
+          if (igual) return antes;
+          for (const id of [...posicoesOutras.current.keys()]) {
+            if (!lista.some((p) => p.id === id)) posicoesOutras.current.delete(id);
+          }
+          return lista;
+        });
+        posicionarMarca();
+      }),
+    ];
     window.addEventListener('resize', posicionarMarca);
     return () => {
-      solta();
+      for (const solta of soltas) solta();
       window.removeEventListener('resize', posicionarMarca);
     };
   }, [session, posicionarMarca]);
+
+  /**
+   * A sua seta, pintada no cursor do sistema.
+   *
+   * É uma variável CSS e não uma classe porque a cor só é conhecida quando o
+   * anfitrião responde — e enquanto ele não responde, o CSS tem um vermelho de
+   * partida, que é a cor de quem conecta sozinho (o caso mais comum de todos).
+   */
+  useEffect(() => {
+    const palco = containerRef.current;
+    if (!palco) return;
+    if (!minhaCor) {
+      palco.style.removeProperty('--seta-propria');
+      return;
+    }
+    palco.style.setProperty('--seta-propria', cursorCssDaSeta(corDoPonteiro(minhaCor.indice), minhaCor.nome));
+  }, [minhaCor]);
+
+  // Reposiciona quando a lista muda: um elemento recém-criado nasce em (0,0) e
+  // ficaria no canto até o próximo pacote chegar.
+  useEffect(() => {
+    posicionarMarca();
+  }, [outrasSetas, posicionarMarca]);
 
   // ── mouse ──
   const pendingMove = useRef<Fraction | null>(null);
@@ -514,10 +608,21 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     // Relativo (Modo Gamer): manda a SOMA do quadro. Somar, e não substituir,
     // é o que preserva o movimento — cada quadro pode ter vários eventos, e
     // perder qualquer um deles faria a mira andar menos do que a mão.
+    //
+    // E manda em número INTEIRO, guardando o resto para o quadro seguinte.
+    // Isto conserta uma perda silenciosa e grande: o SendInput do anfitrião
+    // arredondava, e a fração era descartada a cada quadro. Num movimento
+    // lento — mirar de precisão, justamente onde dói — o deslocamento por
+    // quadro fica abaixo de 1, arredondava para ZERO, e a mira simplesmente
+    // não saía do lugar por mais que a mão andasse. Acumulando o resto, sessenta
+    // quadros de 0,4 px viram 24 px em vez de nada.
     const rel = pendingRel.current;
-    if (rel.dx !== 0 || rel.dy !== 0) {
-      session.sendMouseRel(rel.dx, rel.dy);
-      pendingRel.current = { dx: 0, dy: 0 };
+    const dx = Math.trunc(rel.dx);
+    const dy = Math.trunc(rel.dy);
+    if (dx !== 0 || dy !== 0) {
+      session.sendMouseRel(dx, dy);
+      rel.dx -= dx;
+      rel.dy -= dy;
     }
     const point = pendingMove.current;
     pendingMove.current = null;
@@ -587,7 +692,17 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
 
     // Captura o ponteiro para que arrastar até fora do vídeo continue valendo
     // (selecionar texto, mover janela remota até a borda).
-    video.setPointerCapture(e.pointerId);
+    //
+    // Pode recusar: o navegador exige que o pointerId ainda esteja ativo, e ele
+    // deixa de estar quando o botão é solto entre o evento e esta linha. Deixar
+    // a exceção subir aborta o handler antes do `sendMouseButton` logo abaixo —
+    // ou seja, perde-se o CLIQUE por causa de um recurso de conforto. A captura
+    // é opcional; o clique não é.
+    try {
+      video.setPointerCapture(e.pointerId);
+    } catch {
+      /* segue sem captura: arrastar para fora do vídeo é que deixa de valer */
+    }
     const point = pointerToFraction(video, e.clientX, e.clientY) ?? lastPoint.current;
     lastPoint.current = point;
     session.sendMouseButton(e.button as 0 | 1 | 2, true, point.x, point.y);
@@ -660,7 +775,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       ref={containerRef}
       className={`viewer ${dragging ? 'dragging' : ''} ${outgoing.instavel ? 'instavel' : ''} ${
         state.abas.length > 1 ? 'tem-abas' : ''
-      }`}
+      } ${travado ? 'jogando' : ''}`}
       onPointerMove={revelarBarra}
       onDragOver={(e) => {
         e.preventDefault();
@@ -811,11 +926,14 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         </div>
       )}
 
-      {/* A seta do outro computador, no desenho claro e padrão — a vermelha é
-          a sua, e vem do cursor do sistema (ver styles.css). Nasce escondida:
-          só aparece quando a posição de lá se descola da que você comanda, ou
-          seja, quando a pessoa que está lá pega o mouse dela. */}
-      <div className="seta-remota propria" ref={marcaRef} aria-hidden="true">
+      {/* A seta do ANFITRIÃO: branca, sem cor, com o nome da máquina embaixo.
+          É a única que não obedece a ninguém de fora — quem a move é a pessoa
+          sentada lá. Fica sempre visível, porque agora o seu ponteiro e o dela
+          são de fato independentes: não há mais o instante em que os dois
+          estão no mesmo pixel por serem o mesmo ponteiro.
+          A sua própria seta não está aqui: ela é o cursor do sistema, colorido
+          e nomeado em styles.css / --seta-propria. */}
+      <div className="seta-remota" ref={marcaRef} aria-hidden="true">
         <svg width="16" height="23" viewBox="0 0 16 23">
           <path
             d="M1.6 1.2 L1.6 17 L5.4 13.4 L8 19.9 L10.7 18.8 L8.1 12.5 L13.2 12.5 Z"
@@ -828,6 +946,23 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         <span>{outgoing.meta?.hostName ?? 'computador remoto'}</span>
       </div>
 
+      {/* As setas das OUTRAS pessoas conectadas a este mesmo computador, cada
+          uma na cor que o anfitrião lhe deu e com o nome dela embaixo. O SVG
+          vem pronto do módulo compartilhado — o mesmo desenho que a camada do
+          anfitrião usa, para as duas telas nunca discordarem sobre quem é quem. */}
+      {outrasSetas.map((ponteiro) => (
+        <div
+          key={ponteiro.id}
+          className="seta-visitante"
+          aria-hidden="true"
+          ref={(el) => {
+            if (el) refsOutras.current.set(ponteiro.id, el);
+            else refsOutras.current.delete(ponteiro.id);
+          }}
+          dangerouslySetInnerHTML={{ __html: svgDaSeta(corDoPonteiro(ponteiro.cor), ponteiro.nome) }}
+        />
+      ))}
+
       <Toolbar
         controller={controller}
         state={state}
@@ -838,6 +973,12 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
           const next = !fullscreen;
           setFullscreen(next);
           window.ryke.window.fullscreen(next);
+        }}
+        onJanela={() => {
+          // O estado local precisa acompanhar: sem isto o botão de tela cheia
+          // continuaria mostrando "sair da tela cheia" numa janela que já saiu.
+          setFullscreen(false);
+          window.ryke.window.janela();
         }}
         onMinimize={sairDaSessao}
         onToggleDrawer={() => setShowDrawer((v) => !v)}
@@ -884,6 +1025,7 @@ function Toolbar({
   fullscreen,
   pendingTransfers,
   onToggleFullscreen,
+  onJanela,
   onMinimize,
   onToggleDrawer,
   onNovaConexao,
@@ -901,6 +1043,7 @@ function Toolbar({
   fullscreen: boolean;
   pendingTransfers: number;
   onToggleFullscreen: () => void;
+  onJanela: () => void;
   onMinimize: () => void;
   onToggleDrawer: () => void;
   onNovaConexao: () => void;
@@ -1109,6 +1252,19 @@ function Toolbar({
       >
         <IconEscape />
         {escMinimiza ? 'Desativar Esc' : 'Esc: vai pro jogo'}
+      </button>
+
+      {/* O visualizador nasce ocupando o monitor inteiro. Este botão o devolve
+          a um retângulo no meio da tela, com metade da largura e da altura —
+          e a partir dali é o usuário quem decide o tamanho, arrastando as
+          bordas. É o que permite olhar a tela remota ao lado de algo daqui. */}
+      <button
+        className="tool"
+        onClick={onJanela}
+        data-dica="Encolhe para metade da tela. Depois é só arrastar as bordas para o tamanho que quiser."
+      >
+        <IconJanela />
+        Janela
       </button>
 
       <button

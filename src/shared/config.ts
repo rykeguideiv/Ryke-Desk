@@ -84,6 +84,23 @@ export type Settings = {
   hostOnLaunch: boolean;
   /** Bloquear teclado/mouse físicos do anfitrião durante a sessão (precisa de admin). */
   blockLocalInput: boolean;
+  /**
+   * Cada visitante com a própria seta, sem tomar o cursor do anfitrião.
+   *
+   * LIGADO (o padrão). Quem se conecta ganha um ponteiro virtual colorido —
+   * vermelho para o primeiro, azul para o segundo, verde para o terceiro — com
+   * o nome escrito embaixo. O cursor do Windows desta máquina continua sendo
+   * de quem está sentado nela; ele só é emprestado no instante de um clique e
+   * volta para o lugar logo depois. É o que permite duas pessoas trabalharem
+   * na mesma tela sem disputar o mesmo ponteiro.
+   *
+   * DESLIGADO. O comportamento antigo: o mouse do visitante arrasta o cursor
+   * real do anfitrião, como num controle remoto comum. Vale a pena desligar em
+   * um caso concreto — programas que reagem ao mouse apenas PASSANDO por cima
+   * (menus que abrem sozinhos, dicas de ferramenta) não percebem o ponteiro
+   * virtual, porque para o Windows ele não existe.
+   */
+  setasIndependentes: boolean;
   /** Nome exibido a quem se conectar. */
   displayName: string;
   /**

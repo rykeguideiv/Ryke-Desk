@@ -207,7 +207,23 @@ export type CtrlMeta = {
   activeDisplay: number;
 };
 
-/** Posição do ponteiro em fração da tela (0..1), independente de resolução. */
+/**
+ * Onde a seta DESTE visitante está, em fração da tela (0..1).
+ *
+ * Repare no que ela NÃO é: uma ordem para mover o cursor do Windows do outro
+ * lado. Era isso que fazia, e era o defeito — a pessoa sentada no anfitrião
+ * via o próprio ponteiro ser arrancado da mão, e dois visitantes brigavam pelo
+ * único cursor que a máquina tem.
+ *
+ * Agora ela move um ponteiro VIRTUAL, que é desenho e mais nada: cada
+ * visitante tem o seu, colorido e com o nome embaixo, e o cursor real do
+ * anfitrião continua obedecendo só a quem está lá. O cursor real só é
+ * emprestado no instante de um clique, e devolvido ao lugar em seguida.
+ *
+ * Enquanto o visitante estiver com um botão apertado — arrastando uma janela,
+ * selecionando texto — o cursor real acompanha, porque um arrasto que solta o
+ * ponteiro no meio do caminho não é um arrasto.
+ */
 export type CtrlMouseMove = { t: 'mm'; x: number; y: number };
 export type CtrlMouseButton = { t: 'md' | 'mu'; b: 0 | 1 | 2; x: number; y: number };
 export type CtrlWheel = { t: 'wheel'; dx: number; dy: number; x: number; y: number };
@@ -231,6 +247,22 @@ export type CtrlMouseRel = { t: 'mr'; dx: number; dy: number };
  * faria o anfitrião teleportar o cursor antes de cada tiro.
  */
 export type CtrlMouseRelButton = { t: 'mrb'; b: 0 | 1 | 2; down: boolean };
+
+/**
+ * "Entrei (ou saí) do Modo Gamer."
+ *
+ * O anfitrião precisa saber, e por dois motivos concretos:
+ *
+ *   1. A SETA SOME. Num jogo não existe ponteiro — existe mira, desenhada pelo
+ *      próprio jogo no centro da tela. Continuar desenhando a seta virtual
+ *      deste visitante seria pôr um cursor colorido em cima da mira, parado no
+ *      último lugar em que ele estava antes de o modo ligar.
+ *
+ *   2. O PONTEIRO REAL VAI PARA O CENTRO E FICA LÁ. É o que impede a câmera de
+ *      travar: um ponteiro encostado na borda da tela não tem mais para onde se
+ *      mover, e o deslocamento que o jogo lê vira zero. Ver `warpCursor`.
+ */
+export type CtrlGamer = { t: 'gamer'; on: boolean };
 
 /** `code` é o KeyboardEvent.code — posição física da tecla, não o caractere. */
 export type CtrlKey = { t: 'kd' | 'ku'; code: string; repeat?: boolean };
@@ -273,12 +305,44 @@ export type CtrlPong = { t: 'pong'; at: number; q?: number };
  */
 export type CtrlCursor = { t: 'cursor'; x: number; y: number };
 
+/**
+ * "Você é o visitante número N; a sua seta é esta cor."
+ *
+ * Vai uma vez, do anfitrião para cada visitante, assim que a sessão sobe. O
+ * visitante usa o índice para pintar o PRÓPRIO cursor do sistema — o único
+ * ponteiro que ele move de verdade — e para escrever o nome certo embaixo
+ * dele. Sem esta mensagem cada visitante se pintaria de vermelho, e três
+ * pessoas na mesma máquina veriam três setas vermelhas.
+ *
+ * `nome` é como o anfitrião vai anunciar este visitante aos outros: mandá-lo
+ * de volta evita que cada lado invente um rótulo diferente para a mesma seta.
+ */
+export type CtrlCor = { t: 'cor'; indice: number; nome: string };
+
+/**
+ * Onde estão TODAS as setas da sessão, do ponto de vista do anfitrião.
+ *
+ * Vai do anfitrião para cada visitante pelo canal rápido, e a lista que cada
+ * um recebe já vem sem a seta dele mesmo — a própria seta ele desenha com o
+ * cursor do sistema, sem atraso nenhum, e vê-la chegar de volta pela rede
+ * empilharia duas setas andando com um quadro de diferença.
+ *
+ * Substitui `cursor` quando os dois lados são novos; `cursor` continua sendo
+ * enviado porque uma versão anterior do programa não entende esta mensagem e
+ * ficaria sem enxergar a seta do anfitrião.
+ */
+export type CtrlPonteiros = {
+  t: 'ponteiros';
+  lista: { id: string; nome: string; cor: number; x: number; y: number }[];
+};
+
 export type CtrlMessage =
   | CtrlMeta
   | CtrlMouseMove
   | CtrlMouseButton
   | CtrlMouseRel
   | CtrlMouseRelButton
+  | CtrlGamer
   | CtrlWheel
   | CtrlKey
   | CtrlCombo
@@ -292,6 +356,8 @@ export type CtrlMessage =
   | CtrlPing
   | CtrlPong
   | CtrlCursor
+  | CtrlCor
+  | CtrlPonteiros
   | FileControl;
 
 // ────────────────────── Transferência de arquivos ──────────────────

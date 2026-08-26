@@ -207,6 +207,27 @@ export function IncomingRequest({
               Se você permitir, esta pessoa vai <strong>ver sua tela</strong> e poderá <strong>usar o teclado e o
               mouse</strong> deste computador até você encerrar.
             </p>
+
+            {/* O golpe do falso suporte é o uso indevido mais comum de todo
+                programa de acesso remoto, e ele tem sempre a mesma forma: a
+                vítima recebe uma ligação, instala o programa e lê o número em
+                voz alta. Quem está prestes a cair está exatamente aqui, neste
+                botão, com alguém ao telefone dizendo para clicar. É o único
+                instante em que um aviso ainda pode impedir o prejuízo — e por
+                isso ele é específico, e não um "tenha cuidado" genérico que
+                todo mundo já aprendeu a ignorar. */}
+            <div className="aviso-golpe">
+              <strong>Alguém ligou para você e pediu para instalar isto?</strong>
+              <p>
+                Então <strong>recuse</strong>. Banco, Pix, Receita Federal, loja, operadora e suporte de verdade
+                <strong> nunca</strong> pedem acesso ao seu computador por telefone, WhatsApp ou e-mail. Quem pede é
+                golpista — e o que ele quer é a sua conta bancária, com você olhando.
+              </p>
+              <p>
+                Só permita se <strong>você</strong> procurou essa pessoa, sabe quem ela é e está esperando por ela
+                agora.
+              </p>
+            </div>
           </>
         ) : (
           <p>
@@ -557,6 +578,23 @@ export function SettingsModal({
             type="checkbox"
             checked={settings.syncClipboard}
             onChange={(e) => void controller.updateSettings({ syncClipboard: e.target.checked })}
+          />
+          <span className="switch-track" />
+        </label>
+
+        <label className="switch setting-row">
+          <div className="switch-text">
+            <strong>Cada visitante com a própria seta</strong>
+            <span>
+              Quem se conecta ganha uma seta colorida com o nome dele — vermelha para o primeiro, azul para o
+              segundo, verde para o terceiro — e o cursor deste computador continua sendo seu. Desligue se algum
+              programa daqui só reagir ao mouse passando por cima (menus que abrem sozinhos, dicas de ferramenta).
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.setasIndependentes !== false}
+            onChange={(e) => void controller.updateSettings({ setasIndependentes: e.target.checked })}
           />
           <span className="switch-track" />
         </label>

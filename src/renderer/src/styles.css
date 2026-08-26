@@ -967,7 +967,20 @@ button {
   object-fit: contain;
   display: block;
   outline: none;
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='23' viewBox='0 0 16 23'%3E%3Cpath d='M1.6 1.2 L1.6 17 L5.4 13.4 L8 19.9 L10.7 18.8 L8.1 12.5 L13.2 12.5 Z' fill='%23ff2f2f' stroke='%23ffffff' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E") 2 2, default;
+  /* A SUA seta. É o cursor do sistema — não um elemento desenhado por esta
+     página — e é isso que a mantém sem atraso nenhum: quem a move é o Windows
+     daqui, na mesma instrução em que o mouse se mexe.
+
+     A cor vem do anfitrião, em `--seta-propria`, e traz o seu nome escrito
+     embaixo (ver shared/ponteiros.ts). O vermelho abaixo é só o valor de
+     partida, para o intervalo entre conectar e a cor chegar — e é o certo na
+     esmagadora maioria dos casos, porque quem conecta sozinho é o primeiro. */
+  cursor: var(
+    --seta-propria,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='23' viewBox='0 0 16 23'%3E%3Cpath d='M1.6 1.2 L1.6 17 L5.4 13.4 L8 19.9 L10.7 18.8 L8.1 12.5 L13.2 12.5 Z' fill='%23ff2f2f' stroke='%23ffffff' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E")
+      2 2,
+    default
+  );
 }
 
 /* A seta do computador remoto: desenho claro e padrão, com o nome da máquina
@@ -987,15 +1000,20 @@ button {
   will-change: transform;
 }
 
-/* Escondida enquanto quem está mexendo é você.
-   O computador remoto tem UM ponteiro físico só, e ele obedece ao seu mouse.
-   Enquanto você dirige, a posição que o anfitrião informa é a sua própria,
-   devolvida — desenhar a segunda seta ali empilharia duas marcas no mesmo
-   pixel, andando juntas, que é exatamente a confusão a ser evitada. Ela
-   reaparece no instante em que a posição de lá se descola da sua: é quando a
-   pessoa que está lá pegou o mouse dela. */
-.seta-remota.propria {
-  display: none;
+/* AS SETAS DOS OUTROS VISITANTES.
+   Mesmo desenho da camada que o anfitrião vê — SVG pronto, vindo de
+   shared/ponteiros.ts —, então as duas telas nunca discordam sobre quem é
+   quem. A ponta fica no ponto (2,2) do desenho; a margem negativa é o que
+   encaixa esse pixel exatamente sobre a coordenada recebida. */
+.seta-visitante {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 20;
+  margin: -2px 0 0 -2px;
+  pointer-events: none;
+  will-change: transform;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
 
 .seta-remota svg {
@@ -2353,4 +2371,46 @@ button {
 
 .recent-estrela:hover {
   color: var(--warn);
+}
+
+/* O aviso contra o golpe do falso suporte, no pedido de acesso sem senha.
+   Vermelho e destacado porque compete com uma voz ao telefone dizendo
+   "pode clicar, é rápido" — um texto cinza no meio do parágrafo perderia
+   essa disputa, e é justamente essa disputa que decide o prejuízo. */
+.aviso-golpe {
+  margin: 14px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 90, 90, 0.55);
+  border-left: 4px solid #ff4d4d;
+  border-radius: 8px;
+  background: rgba(255, 60, 60, 0.09);
+}
+
+.aviso-golpe > strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  color: #ff9a9a;
+}
+
+.aviso-golpe p {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.aviso-golpe p:last-child {
+  margin-bottom: 0;
+}
+
+/* Jogando (ponteiro preso): nenhuma seta na tela.
+
+   Num jogo não existe ponteiro — existe mira, desenhada pelo próprio jogo no
+   centro da tela. A seta do anfitrião e as dos outros visitantes ficariam
+   paradas por cima dela, no último lugar em que estavam, atrapalhando
+   exatamente o ponto da tela em que se está olhando. O cursor do sistema já
+   some sozinho: quem o esconde é o pointer lock do navegador. */
+.viewer.jogando .seta-remota,
+.viewer.jogando .seta-visitante {
+  display: none;
 }

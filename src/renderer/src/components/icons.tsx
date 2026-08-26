@@ -115,6 +115,15 @@ export const IconExitFullscreen = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+/** Uma janela com a alça de redimensionar no canto — o botão "Janela". */
+export const IconJanela = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="14" height="11" rx="2" />
+    <path d="M3 8h14" />
+    <path d="M21 21v-5m0 5h-5m5 0-5-5" />
+  </svg>
+);
+
 export const IconPower = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M12 3v9" />

@@ -672,9 +672,19 @@ async function principal() {
 
   // Duas leituras seguidas: o atraso instantâneo precisa se manter baixo, e
   // não só ter passado baixo por acaso numa amostra.
+  //
+  // A segunda leitura ESPERA em vez de fotografar. O atraso instantâneo é
+  // calculado sobre os quadros emitidos desde a medida anterior, e uma tela
+  // parada não emite quadro nenhum — o número simplesmente some da barra até
+  // algo se mexer do outro lado. Fotografar num instante qualquer testava, na
+  // prática, se por acaso havia movimento na tela do anfitrião naquele
+  // segundo, o que não é o que esta verificação existe para provar. Isso
+  // ficou visível quando o mouse do visitante deixou de arrastar o cursor do
+  // anfitrião: sumiu a fonte acidental de movimento que mantinha a medida viva.
   await new Promise((r) => setTimeout(r, 2500));
-  const atrasoDepois = await visitante.avaliar(
+  const atrasoDepois = await visitante.esperar(
     `(() => { const m = document.body.textContent.match(/([0-9]+) ms img/); return m ? Number(m[1]) : null; })()`,
+    20_000,
   );
   check('e continua baixo na medida seguinte', typeof atrasoDepois === 'number' && atrasoDepois < 300,
     `${atrasoDepois} ms`);
@@ -801,78 +811,118 @@ async function principal() {
     );
     check('texto copiado no anfitrião aparece no visitante', clipboardChegou === true);
 
-    // ── 7. o mouse do visitante move o ponteiro real do anfitrião ──
+    // ── 7. a seta do visitante NÃO rouba o cursor do anfitrião ──
     //
-    // Disparamos um evento de ponteiro verdadeiro sobre o elemento de vídeo,
-    // então a conta de "fração da imagem" do visualizador entra no teste
-    // junto com todo o caminho: canal de dados, IPC e SendInput.
+    // Este é o contrato que mudou, e é o coração do recurso: mexer o mouse do
+    // visitante move a SETA VIRTUAL dele, não o ponteiro do Windows do outro
+    // lado. O ponteiro real continua de quem está sentado lá — é isso que
+    // permite duas pessoas trabalharem na mesma tela ao mesmo tempo.
+    //
+    // Só o clique é exceção, e é uma exceção física: o Windows entrega o
+    // clique a quem estiver embaixo do ponteiro. Então o cursor é pego
+    // emprestado pelo instante do clique e devolvido em seguida.
     const cursorOriginal = posicaoDoCursor();
     // Resolução física real do monitor capturado, direto do anfitrião: é
     // contra ela que a fração enviada deve ser convertida.
     const telaAnfitriao = await anfitriao.avaliar('window.ryke.screen.active()');
 
-    /**
-     * Manda o ponteiro para uma fração da tela remota e confere onde ele foi
-     * parar no Windows.
-     *
-     * Cuidado necessário só porque este teste roda as duas pontas na MESMA
-     * tela: o SendInput do anfitrião move o ponteiro físico, que acaba caindo
-     * em cima da janela do visitante e gera ali um `pointermove` de verdade —
-     * que é reenviado, movendo o ponteiro de novo, numa realimentação. Na
-     * prática isso não existe (são dois computadores, e a interface impede
-     * conectar-se ao próprio número), mas aqui bagunçaria a medição.
-     *
-     * A saída é amostrar depressa: o movimento injetado chega antes de a
-     * realimentação ter tempo de acontecer, então basta flagrar o instante em
-     * que o ponteiro passou exatamente pelo alvo.
-     */
-    async function levarPonteiroPara(fx, fy) {
-      const alvoX = Math.round(fx * (telaAnfitriao.width - 1));
-      const alvoY = Math.round(fy * (telaAnfitriao.height - 1));
-      const noAlvo = (p) => Math.abs(p.x - alvoX) <= 4 && Math.abs(p.y - alvoY) <= 4;
+    /** Dispara um evento de ponteiro de verdade sobre o vídeo do visitante. */
+    async function eventoNoVideo(tipo, fx, fy, extra = '') {
+      await visitante.avaliar(`(() => {
+        const v = document.querySelector('video');
+        const r = v.getBoundingClientRect();
+        const escala = Math.min(r.width / v.videoWidth, r.height / v.videoHeight);
+        const largura = v.videoWidth * escala, altura = v.videoHeight * escala;
+        const ox = r.left + (r.width - largura) / 2, oy = r.top + (r.height - altura) / 2;
+        v.dispatchEvent(new PointerEvent('${tipo}', {
+          clientX: ox + ${fx} * largura, clientY: oy + ${fy} * altura,
+          bubbles: true, pointerId: 1, isPrimary: true${extra},
+        }));
+        return true;
+      })()`);
+    }
 
-      let ultima = posicaoDoCursor();
-      let acertou = false;
+    // O canto é o lugar seguro para estacionar: é o ponto em que qualquer
+    // realimentação se aquieta, porque a fração ali é zero.
+    const ESTACIONA = { x: 1, y: 1 };
+    const perto = (p, x, y, folga = 4) => Math.abs(p.x - x) <= folga && Math.abs(p.y - y) <= folga;
 
-      // Várias tentativas porque o envio é agrupado por quadro, e o Chromium
-      // estrangula os quadros de janelas em segundo plano.
-      for (let tentativa = 0; tentativa < 8 && !acertou; tentativa++) {
-        // Estaciona no canto para que "chegou lá" signifique alguma coisa.
-        // A pausa depois disso não é folga: o movimento é agrupado por quadro,
-        // e sem ela o evento real gerado por este SetCursorPos cairia no mesmo
-        // quadro do sintético e o substituiria. O canto também é o ponto em
-        // que a realimentação se aquieta, já que a fração ali é zero.
-        SetCursorPos(1, 1);
-        await dorme(320);
-
-        await visitante.avaliar(`(() => {
-          const v = document.querySelector('video');
-          const r = v.getBoundingClientRect();
-          const escala = Math.min(r.width / v.videoWidth, r.height / v.videoHeight);
-          const largura = v.videoWidth * escala, altura = v.videoHeight * escala;
-          const ox = r.left + (r.width - largura) / 2, oy = r.top + (r.height - altura) / 2;
-          v.dispatchEvent(new PointerEvent('pointermove', {
-            clientX: ox + ${fx} * largura, clientY: oy + ${fy} * altura, bubbles: true, pointerId: 1,
-          }));
-          return true;
-        })()`);
-
-        for (let i = 0; i < 60 && !acertou; i++) {
-          ultima = posicaoDoCursor();
-          if (noAlvo(ultima)) acertou = true;
-          else await dorme(12);
-        }
+    async function aSetaNaoPuxaOCursor(fx, fy) {
+      SetCursorPos(ESTACIONA.x, ESTACIONA.y);
+      await dorme(320);
+      // Várias vezes, e não uma: o envio é agrupado por quadro, e queremos
+      // provar que nem uma rajada inteira de movimento move o cursor de lá.
+      for (let i = 0; i < 5; i++) {
+        await eventoNoVideo('pointermove', fx, fy);
+        await dorme(90);
       }
-
+      await dorme(500);
+      const onde = posicaoDoCursor();
       check(
-        `ponteiro do anfitrião foi para a fração ${fx}/${fy}`,
-        acertou,
-        `esperado ~${alvoX},${alvoY} · obtido ${ultima.x},${ultima.y}`,
+        `mover a seta para ${fx}/${fy} NÃO mexe no cursor do anfitrião`,
+        perto(onde, ESTACIONA.x, ESTACIONA.y),
+        `cursor em ${onde.x},${onde.y} — deveria ter ficado em ${ESTACIONA.x},${ESTACIONA.y}`,
       );
     }
 
-    await levarPonteiroPara(0.25, 0.75);
-    await levarPonteiroPara(0.8, 0.2);
+    await aSetaNaoPuxaOCursor(0.25, 0.75);
+    await aSetaNaoPuxaOCursor(0.8, 0.2);
+
+    /**
+     * O clique: pega emprestado, clica, devolve.
+     *
+     * A amostragem do "chegou lá" é rápida de propósito. Este teste roda as
+     * duas pontas na MESMA tela, então o SendInput do anfitrião joga o
+     * ponteiro físico em cima da janela do visitante — e, com o botão
+     * apertado, aquilo vira um arrasto de verdade que continua mexendo o
+     * cursor. Na prática isso não existe (são dois computadores, e a interface
+     * impede conectar-se ao próprio número); aqui basta flagrar o instante em
+     * que o ponteiro passou pelo alvo.
+     */
+    async function oCliqueEmprestaEDevolve(fx, fy) {
+      const alvoX = Math.round(fx * (telaAnfitriao.width - 1));
+      const alvoY = Math.round(fy * (telaAnfitriao.height - 1));
+
+      let emprestou = false;
+      let ultima = posicaoDoCursor();
+
+      for (let tentativa = 0; tentativa < 6 && !emprestou; tentativa++) {
+        SetCursorPos(ESTACIONA.x, ESTACIONA.y);
+        await dorme(320);
+
+        await eventoNoVideo('pointerdown', fx, fy, ', button: 0, buttons: 1');
+        for (let i = 0; i < 60 && !emprestou; i++) {
+          ultima = posicaoDoCursor();
+          if (perto(ultima, alvoX, alvoY)) emprestou = true;
+          else await dorme(12);
+        }
+        await eventoNoVideo('pointerup', fx, fy, ', button: 0, buttons: 0');
+        await dorme(200);
+      }
+
+      check(
+        `clicar em ${fx}/${fy} leva o cursor do anfitrião até lá`,
+        emprestou,
+        `esperado ~${alvoX},${alvoY} · obtido ${ultima.x},${ultima.y}`,
+      );
+
+      // E devolve. Sem isto o "empréstimo" seria só o comportamento antigo com
+      // outro nome: o cursor ficaria onde o visitante clicou por último, longe
+      // de onde o dono da máquina o tinha deixado.
+      let voltou = false;
+      for (let i = 0; i < 60 && !voltou; i++) {
+        if (perto(posicaoDoCursor(), ESTACIONA.x, ESTACIONA.y, 6)) voltou = true;
+        else await dorme(25);
+      }
+      const fim = posicaoDoCursor();
+      check(
+        'e devolve o cursor para onde ele estava antes do clique',
+        voltou,
+        `cursor em ${fim.x},${fim.y} — deveria ter voltado para ${ESTACIONA.x},${ESTACIONA.y}`,
+      );
+    }
+
+    await oCliqueEmprestaEDevolve(0.25, 0.75);
 
     SetCursorPos(cursorOriginal.x, cursorOriginal.y);
 

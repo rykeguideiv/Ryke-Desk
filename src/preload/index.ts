@@ -8,6 +8,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Favorito, Papel, ScryptParams, Settings } from '../shared/config';
 import type { PerfilCapturaSoftware } from '../shared/qualidade-captura';
+import type { Ponteiro } from '../shared/ponteiros';
 
 const api = {
   app: {
@@ -150,15 +151,24 @@ const api = {
       }>,
   },
 
-  /** Chamado apenas no anfitrião, sempre com dados já validados pela sessão. */
+  /**
+   * Chamado apenas no anfitrião, sempre com dados já validados pela sessão.
+   *
+   * Tudo aqui leva o número de QUEM mandou. Não é enfeite: com várias pessoas
+   * na mesma máquina, é o `peerId` que diz de quem é a seta que se move, quem
+   * está segurando um botão e para quem o cursor real precisa voltar.
+   */
   input: {
-    move: (fx: number, fy: number) => ipcRenderer.send('input:move', fx, fy),
-    button: (button: 0 | 1 | 2, down: boolean, fx: number, fy: number) =>
-      ipcRenderer.send('input:button', button, down, fx, fy),
+    move: (peerId: string, fx: number, fy: number) => ipcRenderer.send('input:move', peerId, fx, fy),
+    button: (peerId: string, button: 0 | 1 | 2, down: boolean, fx: number, fy: number) =>
+      ipcRenderer.send('input:button', peerId, button, down, fx, fy),
     // Modo Gamer: deslocamento relativo e clique sem reposicionar o cursor.
-    moveRel: (dx: number, dy: number) => ipcRenderer.send('input:moveRel', dx, dy),
+    moveRel: (peerId: string, dx: number, dy: number) => ipcRenderer.send('input:moveRel', peerId, dx, dy),
+    /** Entrou/saiu do Modo Gamer: some com a seta e prende o ponteiro no centro. */
+    gamer: (peerId: string, on: boolean) => ipcRenderer.send('input:gamer', peerId, on),
     buttonRel: (button: 0 | 1 | 2, down: boolean) => ipcRenderer.send('input:buttonRel', button, down),
-    wheel: (dx: number, dy: number) => ipcRenderer.send('input:wheel', dx, dy),
+    wheel: (peerId: string, dx: number, dy: number, fx: number, fy: number) =>
+      ipcRenderer.send('input:wheel', peerId, dx, dy, fx, fy),
     key: (code: string, down: boolean) => ipcRenderer.send('input:key', code, down),
     combo: (codes: string[]) => ipcRenderer.send('input:combo', codes),
     text: (value: string) => ipcRenderer.send('input:text', value),
@@ -200,6 +210,8 @@ const api = {
     toggleMaximize: () => ipcRenderer.send('window:maximize'),
     close: () => ipcRenderer.send('window:close'),
     fullscreen: (on: boolean) => ipcRenderer.send('window:fullscreen', on),
+    /** Sai da tela cheia e encolhe para metade do monitor, para arrastar à vontade. */
+    janela: () => ipcRenderer.send('window:janela'),
     /** Traz a janela para a frente e pisca na barra de tarefas. */
     chamarAtencao: () => ipcRenderer.send('window:attention'),
     viewerMode: (on: boolean) => ipcRenderer.send('window:viewer', on),
@@ -223,6 +235,20 @@ const api = {
      * Só chega enquanto há visitante conectado, e só quando o ponto muda.
      */
     onCursor: (fn: (ponto: { x: number; y: number }) => void) => subscribe('cursor:posicao', fn),
+  },
+
+  /**
+   * As setas coloridas dos visitantes, do lado do ANFITRIÃO.
+   *
+   * A interface diz quem entrou e com que cor; o processo principal desenha
+   * isso na camada transparente por cima da tela e devolve, vinte vezes por
+   * segundo, onde cada seta está — para a interface repassar a cada visitante
+   * as setas dos OUTROS.
+   */
+  ponteiros: {
+    entrar: (peerId: string, nome: string, cor: number) => ipcRenderer.send('ponteiros:entrar', peerId, nome, cor),
+    sair: (peerId: string) => ipcRenderer.send('ponteiros:sair', peerId),
+    onEstado: (fn: (lista: Ponteiro[]) => void) => subscribe('ponteiros:estado', fn),
   },
 
   /**

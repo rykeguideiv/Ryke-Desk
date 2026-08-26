@@ -5,6 +5,7 @@ import { sourceFromDisk, sourceFromFile, type TransferView } from './files';
 import type { Favorito, Papel, Settings } from '../../../shared/config';
 import type { EstadoPonto } from '../../../shared/malha';
 import { DIGITOS_NUMERO } from '../../../shared/encontro';
+import { nomeCurto, proximaCorLivre } from '../../../shared/ponteiros';
 
 /**
  * Cérebro da interface: mantém o estado inteiro do aplicativo e conduz as
@@ -191,6 +192,14 @@ export class Controller {
    * recusar.
    */
   private hostSessions = new Map<string, Session>();
+  /**
+   * A cor da seta de cada visitante — 0 = vermelho, 1 = azul, 2 = verde.
+   *
+   * Quem sai devolve a cor para a fila. Se o vermelho desconecta e outro
+   * entra, o novo herda o vermelho: a promessa é "o primeiro é vermelho", e
+   * não "o quarto a entrar desde que o programa abriu".
+   */
+  private coresDeVisitantes = new Map<string, number>();
   /** Sessões em que ESTE computador é o visitante — uma por aba aberta. */
   private viewerSessions = new Map<string, Session>();
   /**
@@ -373,6 +382,15 @@ export class Controller {
       // em vez de depender da seta que vem atrasada dentro do vídeo.
       window.ryke.session.onCursor((ponto) => {
         for (const sessao of this.hostSessions.values()) sessao.sendCursor(ponto.x, ponto.y);
+      }),
+      // E as setas dos visitantes vão para todos os visitantes, MENOS para o
+      // dono de cada uma. A própria seta cada um desenha com o cursor do
+      // sistema, que não tem atraso; recebê-la de volta pela rede empilharia
+      // duas setas andando com um quadro de diferença uma da outra.
+      window.ryke.ponteiros.onEstado((lista) => {
+        for (const [peerId, sessao] of this.hostSessions) {
+          sessao.sendPonteiros(lista.filter((ponteiro) => ponteiro.id !== peerId));
+        }
       }),
     );
 
@@ -1050,6 +1068,14 @@ export class Controller {
     const session = new Session('anfitriao', peerId, this.signaling!, this.iceServers);
     this.hostSessions.set(peerId, session);
 
+    // A seta deste visitante: a primeira cor livre e um nome que caiba embaixo
+    // dela. O processo principal já pode desenhá-la — ela nasce no meio da
+    // tela e o primeiro movimento a leva para o lugar certo.
+    const cor = proximaCorLivre(this.coresDeVisitantes.values());
+    this.coresDeVisitantes.set(peerId, cor);
+    const nomeDaSeta = this.nomeDaSeta(peerId);
+    window.ryke.ponteiros.entrar(peerId, nomeDaSeta, cor);
+
     session.on('stats', (stats) => {
       if (this.state.incoming?.peerId === peerId && this.state.incoming.phase === 'ativa') {
         this.set({ incoming: { ...this.state.incoming, stats } });
@@ -1058,6 +1084,9 @@ export class Controller {
     session.on('transfers', () => this.refreshTransfers());
     session.on('ready', () => {
       window.ryke.session.setActive(true);
+      // "A sua seta é a vermelha, e o nome nela é este." Vai pelo canal
+      // confiável: uma cor perdida deixaria dois visitantes vermelhos.
+      session.sendCor(cor, nomeDaSeta);
       // Enquanto alguém comanda esta máquina, a senha fica trancada: quem está
       // do outro lado poderia abrir este programa aqui dentro e trocá-la.
       window.ryke.session.visitantes(this.hostSessions.size);
@@ -1071,6 +1100,9 @@ export class Controller {
     });
     session.on('closed', (reason) => {
       this.hostSessions.delete(peerId);
+      // A seta some da tela do anfitrião e a cor volta para a fila.
+      this.coresDeVisitantes.delete(peerId);
+      window.ryke.ponteiros.sair(peerId);
       // O bloqueio de suspensão só sai quando o ÚLTIMO visitante vai embora:
       // com várias sessões, desligá-lo na primeira que fecha deixaria a tela
       // do anfitrião apagar no meio das outras.
@@ -1101,9 +1133,36 @@ export class Controller {
     }
   }
 
+  /**
+   * O nome que vai escrito, em letra pequena, embaixo da seta deste visitante.
+   *
+   * Três setas coloridas sem nome são três enigmas — é por isso que o rótulo
+   * não é opcional.
+   *
+   * O que ele NÃO usa é deliberado: o nome que o outro computador se deu no
+   * knock. Aquele texto é escolhido por quem está do outro lado, e este rótulo
+   * é lido de relance, no meio da tela, como se fosse a identidade de quem
+   * está comandando. Bastaria alguém pôr "Suporte Microsoft" no nome exibido
+   * para que a própria interface do Ryke Desk carimbasse a mentira do golpista
+   * na tela da vítima. Aqui só entram duas fontes, e as duas são desta
+   * máquina: o apelido que o DONO deste computador deu ao número, ou o número
+   * em si — que não se falsifica, porque é por ele que a conexão chegou.
+   */
+  private nomeDaSeta(peerId: string): string {
+    const favorito = this.state.favoritos.find((f) => f.numero === peerId)?.nome;
+    return nomeCurto(favorito || formatId(peerId));
+  }
+
+  /** A cor da seta de um visitante conectado agora, ou null se não há. */
+  corDoVisitante(peerId: string): number | null {
+    return this.coresDeVisitantes.get(peerId) ?? null;
+  }
+
   /** Encerra TODAS as sessões em que este computador é o anfitrião. */
   endHostSession(reason: string): void {
     for (const sessao of this.hostSessions.values()) sessao.close(reason);
+    for (const peerId of this.hostSessions.keys()) window.ryke.ponteiros.sair(peerId);
+    this.coresDeVisitantes.clear();
     this.hostSessions.clear();
     this.filaDeAprovacao = [];
     this.clearApprovalTimeout();

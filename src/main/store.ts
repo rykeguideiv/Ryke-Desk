@@ -75,6 +75,7 @@ function defaults(): Settings {
     quality: 'auto',
     hostOnLaunch: true,
     blockLocalInput: false,
+    setasIndependentes: true,
     displayName: process.env.COMPUTERNAME ?? 'Meu computador',
     turnUrl: '',
     turnUser: '',

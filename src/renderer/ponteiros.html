@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Setas do Ryke Desk</title>
+    <!--
+      A camada de setas do ANFITRIÃO.
+
+      É uma janela transparente, sempre por cima, que o mouse atravessa: ela
+      não recebe clique nenhum (setIgnoreMouseEvents), não aparece na barra de
+      tarefas e não rouba o foco. Serve para uma coisa só — quem está sentado
+      neste computador ver onde cada visitante está apontando, com o nome
+      embaixo de cada seta.
+
+      Página separada, sem React, de propósito: precisa subir junto com a
+      sessão e redesenhar sessenta vezes por segundo sem custar nada.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        /* Nenhum pixel desta janela deve interceptar mouse. O
+           setIgnoreMouseEvents já garante isso no lado do Windows; aqui é o
+           cinto de segurança para o caso de a janela ganhar foco por engano. */
+        pointer-events: none;
+        user-select: none;
+        cursor: none;
+      }
+      #palco {
+        position: absolute;
+        inset: 0;
+      }
+      /*
+        O aviso de que este computador está sendo controlado agora.
+
+        Ele existe por um motivo de segurança, não de estética. O golpe do
+        falso suporte depende de a vítima esquecer que continua conectada: o
+        golpista minimiza a janela do programa e trabalha por baixo, e a pessoa
+        acha que a sessão acabou. Este aviso mora numa janela sempre no topo,
+        que atravessa o mouse e que o lado remoto não consegue fechar,
+        minimizar nem cobrir — porque quem a controla é o processo daqui.
+
+        E, por estar FORA da captura de vídeo, quem está do outro lado nem
+        sabe que ele está na tela. Não dá para pedir à vítima que o ignore.
+      */
+      #aviso {
+        position: absolute;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        gap: 8px;
+        max-width: 90vw;
+        padding: 5px 14px 6px;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        border-top: none;
+        border-radius: 0 0 10px 10px;
+        background: rgba(150, 12, 12, 0.92);
+        color: #fff;
+        font: 600 12px/1.3 "Segoe UI", Arial, sans-serif;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+      }
+      #aviso.ligado {
+        display: flex;
+      }
+      #aviso .bolinha {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #ff5a5a;
+        box-shadow: 0 0 6px #ff5a5a;
+        /* Piscar é o que diferencia "está acontecendo agora" de um enfeite
+           que o olho para de ver depois de dez minutos na tela. */
+        animation: pulso 1.6s ease-in-out infinite;
+      }
+      @keyframes pulso {
+        50% {
+          opacity: 0.25;
+        }
+      }
+      #aviso .quem {
+        font-weight: 400;
+        opacity: 0.92;
+      }
+
+      .seta {
+        position: absolute;
+        left: 0;
+        top: 0;
+        /* Sem transição: a seta tem de estar onde a mão do outro está, não
+           atrás dela. Um easing de 100 ms aqui vira "atraso" na percepção. */
+        will-change: transform;
+        /* A ponta da seta é o ponto (2,2) do desenho — ver SETA_HOTSPOT. */
+        margin: -2px 0 0 -2px;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+      }
+    </style>
+  </head>
+  <body>
+    <div id="palco"></div>
+    <div id="aviso">
+      <span class="bolinha"></span>
+      <span>Este computador está sendo controlado remotamente</span>
+      <span class="quem" id="aviso-quem"></span>
+    </div>
+    <script type="module" src="/src/ponteiros-camada.ts"></script>
+  </body>
+</html>
