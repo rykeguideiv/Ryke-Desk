@@ -195,6 +195,14 @@ type PonteiroVivo = { nome: string; cor: number; x: number; y: number };
 
 const ponteiros = new Map<string, PonteiroVivo>();
 let janelaSetas: BrowserWindow | null = null;
+/**
+ * Este Windows recusou esconder a camada da captura — não insista.
+ *
+ * Sem esta trava, cada visitante que entrasse tentaria abrir a camada de novo,
+ * falharia do mesmo jeito e repetiria o aviso na tela. Um alerta é informação;
+ * o mesmo alerta cinco vezes é ruído, e ruído a pessoa aprende a ignorar.
+ */
+let camadaRecusada = false;
 
 function setasIndependentes(): boolean {
   // Ausente = ligado. Quem atualiza de uma versão antiga não tinha a chave
@@ -223,6 +231,7 @@ function podeEsconderDaCaptura(): boolean {
 
 function abrirCamadaDeSetas(): void {
   if (janelaSetas && !janelaSetas.isDestroyed()) return;
+  if (camadaRecusada) return;
   if (!podeEsconderDaCaptura()) return;
 
   const alvo = findDisplay(captureDisplayId);
@@ -260,6 +269,10 @@ function abrirCamadaDeSetas(): void {
   janelaSetas.setIgnoreMouseEvents(true, { forward: false });
   janelaSetas.setAlwaysOnTop(true, 'screen-saver');
   janelaSetas.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // Pedido também pelo caminho do Electron, por garantia. Quem decide se a
+  // camada aparece, porém, é a conferência lá embaixo — este método não conta
+  // se deu certo, e aqui "não deu certo" significa seta duplicada na tela de
+  // todo mundo.
   janelaSetas.setContentProtection(true);
 
   janelaSetas.on('closed', () => {
@@ -271,9 +284,29 @@ function abrirCamadaDeSetas(): void {
   else void janelaSetas.loadFile(join(__dirname, '../renderer/ponteiros.html'));
 
   janelaSetas.once('ready-to-show', () => {
+    const janela = janelaSetas;
+    if (!janela || janela.isDestroyed()) return;
+
     // showInactive, e não show: mostrar normalmente traria o foco para uma
     // janela vazia e tiraria o cursor de onde o usuário estava trabalhando.
-    janelaSetas?.showInactive();
+    janela.showInactive();
+
+    // A exclusão da captura é aplicada AGORA, com a janela já criada de fato
+    // pelo Windows, e o resultado é conferido. Antes de existir handle nativo
+    // o pedido cai no vazio, e era assim que a camada acabava dentro do vídeo.
+    //
+    // Se o Windows recusar, a camada NÃO fica. Perder as setas na tela de quem
+    // está sendo acessado é ruim; deixá-las entrarem no vídeo é pior — vira uma
+    // segunda seta vermelha atrás da de cada visitante, e o programa passa a
+    // parecer quebrado justamente no recurso que ele tem de diferente.
+    if (!input.excluirDaCaptura(janela.getNativeWindowHandle())) {
+      console.error('[setas] o Windows recusou esconder a camada da captura — camada desativada');
+      camadaRecusada = true;
+      fecharCamadaDeSetas();
+      send('setas:indisponivel');
+      return;
+    }
+
     desenharSetas();
   });
 }

@@ -81,6 +81,27 @@ const GetCursorPos = user32.func('int __stdcall GetCursorPos(_Out_ POINT *p)');
  * lido como movimento real e a mira giraria sozinha.
  */
 const SetCursorPos = user32.func('int __stdcall SetCursorPos(int X, int Y)');
+
+/**
+ * Torna uma janela invisível para quem grava a tela.
+ *
+ * Chamamos esta função diretamente, em vez de usar o `setContentProtection` do
+ * Electron, por um motivo prático: precisamos saber se ela FUNCIONOU. O método
+ * do Electron não devolve nada, e uma falha silenciosa aqui tem consequência
+ * visível — a camada de setas entra no vídeo, e cada visitante passa a ver a
+ * própria seta duas vezes: a de verdade, instantânea, e o eco dela chegando
+ * pela imagem com o atraso da rede. Duas setas vermelhas quase sobrepostas,
+ * uma arrastando atrás da outra.
+ *
+ * WDA_EXCLUDEFROMCAPTURE existe a partir do Windows 10 2004 (build 19041).
+ * Antes dele só havia WDA_MONITOR, que não esconde: pinta de preto na captura,
+ * o que numa janela do tamanho da tela seria muito pior do que o problema.
+ * Por isso não há caminho reserva — ou exclui de verdade, ou a camada não abre.
+ */
+const SetWindowDisplayAffinity = user32.func(
+  'int __stdcall SetWindowDisplayAffinity(uintptr hWnd, uint32 dwAffinity)',
+);
+const WDA_EXCLUDEFROMCAPTURE = 0x00000011;
 const BlockInputNative = user32.func('int __stdcall BlockInput(int fBlockIt)');
 
 const INPUT_SIZE = koffi.sizeof(INPUT);
@@ -325,6 +346,22 @@ export function cursorPosition(): { x: number; y: number } | null {
  */
 export function warpCursor(x: number, y: number): boolean {
   return SetCursorPos(Math.round(x), Math.round(y)) !== 0;
+}
+
+/**
+ * Esconde a janela da captura de tela. Devolve false se o Windows recusou.
+ *
+ * @param handle o que `BrowserWindow.getNativeWindowHandle()` devolve — um
+ *   Buffer com o HWND lá dentro, e não o HWND em si. Ler o ponteiro do buffer
+ *   é obrigatório: passar o Buffer direto entregaria à API o endereço do
+ *   buffer, que não é janela nenhuma, e a chamada falharia sem explicar por quê.
+ */
+export function excluirDaCaptura(handle: Buffer): boolean {
+  if (handle.length < 4) return false;
+  // HWND tem o tamanho de um ponteiro: 8 bytes no x64, 4 no x86.
+  const hwnd = handle.length >= 8 ? Number(handle.readBigUInt64LE(0)) : handle.readUInt32LE(0);
+  if (!hwnd) return false;
+  return SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) !== 0;
 }
 
 export function blockLocalInput(on: boolean): boolean {

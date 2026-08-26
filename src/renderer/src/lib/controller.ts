@@ -200,6 +200,8 @@ export class Controller {
    * não "o quarto a entrar desde que o programa abriu".
    */
   private coresDeVisitantes = new Map<string, number>();
+  /** O nome que cada visitante deu à máquina dele — vira o rótulo da seta. */
+  private nomesDeVisitantes = new Map<string, string>();
   /** Sessões em que ESTE computador é o visitante — uma por aba aberta. */
   private viewerSessions = new Map<string, Session>();
   /**
@@ -387,6 +389,12 @@ export class Controller {
       // dono de cada uma. A própria seta cada um desenha com o cursor do
       // sistema, que não tem atraso; recebê-la de volta pela rede empilharia
       // duas setas andando com um quadro de diferença uma da outra.
+      window.ryke.ponteiros.onIndisponivel(() => {
+        this.toast(
+          'info',
+          'Este Windows não deixou esconder a camada das setas da gravação de tela, então ela foi desligada — você não verá as setas de quem se conectar. O controle e as setas do outro lado continuam funcionando normalmente.',
+        );
+      }),
       window.ryke.ponteiros.onEstado((lista) => {
         for (const [peerId, sessao] of this.hostSessions) {
           sessao.sendPonteiros(lista.filter((ponteiro) => ponteiro.id !== peerId));
@@ -672,6 +680,8 @@ export class Controller {
     // Máquina de estados do anfitrião.
     switch (data.t) {
       case 'knock':
+        // O nome da máquina do visitante vira o rótulo embaixo da seta dele.
+        if (data.name) this.nomesDeVisitantes.set(from, data.name);
         return this.onKnock(from, data.modo ?? 'senha');
       case 'proof':
         return this.onProof(from, data.proof);
@@ -1137,20 +1147,29 @@ export class Controller {
    * O nome que vai escrito, em letra pequena, embaixo da seta deste visitante.
    *
    * Três setas coloridas sem nome são três enigmas — é por isso que o rótulo
-   * não é opcional.
+   * não é opcional. E o que serve de nome é o NOME DO COMPUTADOR: "Notebook da
+   * Ana" diz de quem é a seta; "481 922 730 155" não diz nada a ninguém no meio
+   * de uma sessão.
    *
-   * O que ele NÃO usa é deliberado: o nome que o outro computador se deu no
-   * knock. Aquele texto é escolhido por quem está do outro lado, e este rótulo
-   * é lido de relance, no meio da tela, como se fosse a identidade de quem
-   * está comandando. Bastaria alguém pôr "Suporte Microsoft" no nome exibido
-   * para que a própria interface do Ryke Desk carimbasse a mentira do golpista
-   * na tela da vítima. Aqui só entram duas fontes, e as duas são desta
-   * máquina: o apelido que o DONO deste computador deu ao número, ou o número
-   * em si — que não se falsifica, porque é por ele que a conexão chegou.
+   * A ordem vai da informação mais confiável para a mais útil:
+   *
+   *   1. O apelido que o DONO desta máquina salvou nos favoritos. É o único
+   *      que não vem de fora, então vem primeiro.
+   *   2. O nome que a máquina do visitante se deu (o `name` do knock) — na
+   *      prática o nome do Windows dele, que é o que a pessoa reconhece.
+   *   3. O número, quando não há nem uma coisa nem outra.
+   *
+   * SOBRE O ITEM 2, com todas as letras: aquele texto é escolhido por quem
+   * está do outro lado, e portanto pode mentir — alguém pode se chamar
+   * "Suporte Microsoft". Ele está aqui mesmo assim porque este rótulo aparece
+   * DENTRO de uma sessão que o dono da máquina já autorizou, e a decisão que
+   * importa acontece antes, na tela de permissão — que mostra o número, não o
+   * nome, e traz o aviso sobre o golpe do falso suporte. Confiar no nome para
+   * decorar uma seta é diferente de confiar nele para abrir a porta.
    */
   private nomeDaSeta(peerId: string): string {
     const favorito = this.state.favoritos.find((f) => f.numero === peerId)?.nome;
-    return nomeCurto(favorito || formatId(peerId));
+    return nomeCurto(favorito || this.nomesDeVisitantes.get(peerId) || formatId(peerId));
   }
 
   /** A cor da seta de um visitante conectado agora, ou null se não há. */

@@ -493,6 +493,14 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
 
   /** Quem é você nesta sessão: a cor da sua seta e o nome escrito nela. */
   const [minhaCor, setMinhaCor] = useState<{ indice: number; nome: string } | null>(null);
+  /**
+   * A mesma cor, num ref.
+   *
+   * O ouvinte de `ponteiros` é registrado uma vez e capturaria o valor do
+   * primeiro render para sempre. Um ref é lido no momento em que o pacote
+   * chega, que é quando a informação precisa estar certa.
+   */
+  const minhaCorRef = useRef<number | null>(null);
   /** As setas dos DEMAIS visitantes. Estado, porque entram e saem devagar. */
   const [outrasSetas, setOutrasSetas] = useState<Ponteiro[]>([]);
   /** Onde cada uma está agora — fora do estado, porque muda 60 vezes por segundo. */
@@ -545,8 +553,23 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         cursorRemoto.current = ponto;
         posicionarMarca();
       }),
-      session.on('cor', (cor) => setMinhaCor(cor)),
+      session.on('cor', (cor) => {
+        minhaCorRef.current = cor.indice;
+        setMinhaCor(cor);
+      }),
       session.on('ponteiros', (lista) => {
+        // Cinto e suspensório: o anfitrião já tira a seta de cada um da lista
+        // que manda para ele, mas se algum dia isso falhar o resultado é feio e
+        // difícil de diagnosticar — duas setas da mesma cor quase sobrepostas,
+        // a de verdade e o eco dela chegando pela rede um quadro atrás.
+        //
+        // A cor serve de assinatura porque ela é única entre os conectados:
+        // `proximaCorLivre` nunca entrega a mesma cor a duas pessoas ao mesmo
+        // tempo. Então "esta seta tem a minha cor" só pode significar "esta
+        // seta sou eu".
+        const minha = minhaCorRef.current;
+        if (minha !== null) lista = lista.filter((p) => p.cor !== minha);
+
         for (const p of lista) posicoesOutras.current.set(p.id, { x: p.x, y: p.y });
         // A lista só vira estado quando MUDA de composição — alguém entrou,
         // alguém saiu, alguém trocou de nome. Redesenhar a árvore do React

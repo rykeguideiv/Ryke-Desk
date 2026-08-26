@@ -249,6 +249,15 @@ const api = {
     entrar: (peerId: string, nome: string, cor: number) => ipcRenderer.send('ponteiros:entrar', peerId, nome, cor),
     sair: (peerId: string) => ipcRenderer.send('ponteiros:sair', peerId),
     onEstado: (fn: (lista: Ponteiro[]) => void) => subscribe('ponteiros:estado', fn),
+    /**
+     * O Windows recusou esconder a camada da captura, então ela não abriu.
+     *
+     * Falha degradada, não fatal: quem está nesta máquina deixa de ver as setas
+     * dos visitantes, e todo o resto — inclusive os ponteiros continuarem
+     * independentes — segue funcionando. Precisa ser dito, porém, porque a
+     * alternativa era o usuário concluir sozinho que o recurso está quebrado.
+     */
+    onIndisponivel: (fn: () => void) => subscribe('setas:indisponivel', fn),
   },
 
   /**
