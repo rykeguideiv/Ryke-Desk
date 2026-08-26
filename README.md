@@ -77,6 +77,23 @@ Foundation**, o que faz o Windows reconhecê-lo como um programa com editor
 verificado. É esse o arquivo a baixar; qualquer `.exe` do Ryke Desk vindo de
 outro lugar não passou por este processo.
 
+## No celular também
+
+A pasta [`ryke-mobile/`](ryke-mobile/) é o aplicativo Android — ele **acessa** um
+PC, não é acessado. Serve para resolver alguma coisa no computador de casa
+estando na rua, com um joystick na tela para conduzir o cursor com o polegar
+(o dedo é grosso, o cursor do Windows é fino; tocar direto na imagem seria um
+brinquedo inútil).
+
+O APK sai na mesma [Release](../../releases) do instalador do Windows. Ele pede
+**uma única permissão: acesso à internet** — e isso é verificado por um teste
+automático a cada compilação, junto com a conferência de que ele não pede
+câmera, microfone, armazenamento, localização nem contatos.
+
+Não está na Play Store: é assinado com a chave de depuração do Android, que é a
+única possível num repositório público (uma chave de release é um segredo).
+Instala-se abrindo o próprio arquivo, com "fontes desconhecidas" permitido.
+
 ## Usando
 
 1. Instale a versão mais recente do `RykeDesk-Setup-<versão>.exe` (ver
@@ -449,6 +466,7 @@ sozinho a maior parte das dúvidas:
 | `src/main/input.ts` | Injeção de teclado e mouse via `user32.dll` |
 | `src/shared/ponteiros.ts` | As setas coloridas: paleta, desenho e o porquê de tudo |
 | `src/main/auth.ts` | Senha, desafio-resposta e freio de força bruta |
+| `ryke-mobile/src/lib/joystick.ts` | O joystick do celular: zona morta, aceleração, limites |
 
 O cliente MQTT é escrito à mão de propósito: um programa que captura tela e
 injeta teclado já é examinado com lupa por antivírus, e cada dependência a

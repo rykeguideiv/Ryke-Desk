@@ -1,0 +1,944 @@
+/* ══════════════════════════════════════════════════════════════
+   Ryke Desk Mobile
+
+   Tema escuro assumido: o aplicativo passa a maior parte do tempo
+   mostrando a tela de um computador, e moldura clara competiria
+   com o conteúdo. Alvos de toque com no mínimo 44px, que é o piso
+   para o dedo acertar sem raiva.
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  --bg: #0b0e14;
+  --sup: #151a25;
+  --sup-alto: #1c2331;
+  --borda: #232b3b;
+  --txt: #e9eef8;
+  --txt-fraco: #94a2ba;
+  --txt-apagado: #5d6a80;
+  --acento: #4c7dff;
+  --ok: #35d07f;
+  --alerta: #f0b429;
+  --perigo: #ff5b5b;
+  --raio: 14px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#raiz {
+  height: 100%;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--txt);
+  background: var(--bg);
+  overflow: hidden;
+  /* Seleção de texto atrapalha gesto; liberada só nos campos. */
+  user-select: none;
+  overscroll-behavior: none;
+}
+
+input {
+  user-select: text;
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ───────────────────────── tela inicial ───────────────────────── */
+
+.inicio {
+  flex: 1;
+  overflow-y: auto;
+  padding: max(16px, env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.inicio header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px 2px;
+}
+
+.inicio h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.selo {
+  margin-left: auto;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgb(53 208 127 / 12%);
+  color: var(--ok);
+  border: 1px solid rgb(53 208 127 / 30%);
+}
+
+.selo.off {
+  background: rgb(240 180 41 / 12%);
+  color: var(--alerta);
+  border-color: rgb(240 180 41 / 30%);
+}
+
+.cartao {
+  background: var(--sup);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+label {
+  font-size: 12.5px;
+  color: var(--txt-fraco);
+  font-weight: 600;
+}
+
+.fraco {
+  color: var(--txt-apagado);
+  font-weight: 400;
+}
+
+.campo {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border-radius: 11px;
+  background: var(--bg);
+  border: 1px solid var(--borda);
+  outline: none;
+}
+
+.campo:focus {
+  border-color: var(--acento);
+}
+
+.campo.numero {
+  font-size: 21px;
+  letter-spacing: 1.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.campo-com-botao {
+  display: flex;
+  gap: 8px;
+}
+
+.campo-com-botao .campo {
+  flex: 1;
+}
+
+.campo-com-botao button {
+  width: 48px;
+  border-radius: 11px;
+  background: var(--sup-alto);
+  font-size: 17px;
+}
+
+.modo {
+  font-size: 12.5px;
+  color: var(--txt-fraco);
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgb(76 125 255 / 8%);
+  border: 1px solid rgb(76 125 255 / 20%);
+}
+
+.modo.pedido {
+  background: rgb(240 180 41 / 8%);
+  border-color: rgb(240 180 41 / 22%);
+}
+
+.impedimento {
+  font-size: 12.5px;
+  color: var(--txt-fraco);
+  background: rgb(255 255 255 / 4%);
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 10px;
+  padding: 9px 12px;
+}
+
+.bt {
+  min-height: 48px;
+  padding: 12px 16px;
+  border-radius: 11px;
+  background: var(--sup-alto);
+  border: 1px solid var(--borda);
+  font-weight: 600;
+}
+
+.bt:disabled {
+  opacity: 0.45;
+}
+
+.bt.principal {
+  background: var(--acento);
+  border-color: var(--acento);
+  color: #fff;
+  font-size: 16px;
+}
+
+.bt.perigo {
+  background: var(--perigo);
+  border-color: var(--perigo);
+  color: #fff;
+}
+
+.bt.sair {
+  color: var(--perigo);
+}
+
+.link {
+  align-self: flex-start;
+  font-size: 13px;
+  color: var(--txt-fraco);
+  padding: 8px 0;
+  min-height: 40px;
+}
+
+.salvar {
+  display: flex;
+  gap: 8px;
+}
+
+.salvar .campo {
+  flex: 1;
+}
+
+.favoritos {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.favorito {
+  display: flex;
+  border-radius: 11px;
+  border: 1px solid var(--borda);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.favorito .abrir {
+  flex: 1;
+  text-align: left;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 52px;
+}
+
+.favorito .abrir strong {
+  font-size: 14.5px;
+}
+
+.favorito .abrir small {
+  color: var(--txt-apagado);
+  font-variant-numeric: tabular-nums;
+}
+
+.favorito .remover {
+  width: 46px;
+  color: var(--txt-apagado);
+  font-size: 17px;
+}
+
+.favorito .remover.estrela {
+  color: var(--alerta);
+}
+
+/* Caixinha de escolha — guardar senha. Alvo grande de propósito: é uma
+   decisão de segurança, e errar o toque aqui tem consequência. */
+.caixinha {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 11px 12px;
+  border-radius: 11px;
+  background: rgb(255 255 255 / 4%);
+  border: 1px solid rgb(255 255 255 / 8%);
+  font-weight: 500;
+  color: var(--txt);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.caixinha input[type='checkbox'] {
+  width: 21px;
+  height: 21px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  accent-color: var(--acento);
+}
+
+.caixinha span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.caixinha small {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--txt-apagado);
+  line-height: 1.45;
+}
+
+.link:disabled {
+  opacity: 0.45;
+}
+
+.pontos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ponto {
+  font-size: 11px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 4%);
+  border: 1px solid rgb(255 255 255 / 8%);
+  color: var(--txt-apagado);
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.ponto.on {
+  color: var(--txt);
+  border-color: rgb(53 208 127 / 35%);
+}
+
+.ponto.on b {
+  color: var(--ok);
+  font-size: 9.5px;
+}
+
+.ponto.off {
+  opacity: 0.5;
+}
+
+.dica {
+  font-size: 12px;
+  color: var(--txt-apagado);
+  line-height: 1.55;
+}
+
+.inicio footer {
+  font-size: 11.5px;
+  color: var(--txt-apagado);
+  text-align: center;
+  padding: 4px 8px 8px;
+  line-height: 1.6;
+}
+
+/* ───────────────────────── visualizador ───────────────────────── */
+
+.visualizador {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+
+.palco {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  /* touch-action none: o navegador não pode roubar o gesto para rolar a
+     página, senão arrastar no vídeo mexeria a tela do celular em vez do
+     mouse do computador. */
+  touch-action: none;
+}
+
+.palco video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  /* Sem transição: o zoom precisa acompanhar o dedo, não persegui-lo. */
+}
+
+.barra-sessao {
+  position: absolute;
+  top: env(safe-area-inset-top);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  background: rgb(10 14 26 / 92%);
+  border-bottom: 1px solid var(--borda);
+  overflow-x: auto;
+}
+
+.barra-sessao .bt {
+  min-height: 38px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  border-radius: 9px;
+  white-space: nowrap;
+}
+
+.barra-sessao .bt.ativo {
+  background: var(--acento);
+  border-color: var(--acento);
+  color: #fff;
+}
+
+.barra-sessao .nome {
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.barra-sessao .medidas {
+  font-size: 10.5px;
+  color: var(--txt-apagado);
+  white-space: nowrap;
+}
+
+.barra-sessao .espaco {
+  flex: 1;
+}
+
+.mostrar-barra {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  width: 54px;
+  height: 30px;
+  border-radius: 0 0 12px 12px;
+  background: rgb(10 14 26 / 82%);
+  color: var(--txt-fraco);
+}
+
+/* ──────────────── controle de mouse (joystick) ────────────────
+   Haste na esquerda, botões na direita: é onde os polegares caem com o
+   aparelho deitado nas duas mãos, e é a única divisão que deixa mover e
+   clicar ao mesmo tempo — sem isso não existe arrastar. */
+
+.controle-mouse {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 15;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 10px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  gap: 12px;
+  /* O meio da tela continua livre: só a haste e os botões pegam o dedo. */
+  pointer-events: none;
+}
+
+.controle-mouse > * {
+  pointer-events: auto;
+}
+
+.lado-haste {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.joystick {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background: rgb(14 19 30 / 62%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  box-shadow: 0 8px 26px rgb(0 0 0 / 45%);
+  display: grid;
+  place-items: center;
+  touch-action: none;
+}
+
+/* Anel da zona morta: mostra, sem explicar, que o centro não move nada. */
+.joystick .anel {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px dashed rgb(255 255 255 / 16%);
+}
+
+.joystick .haste {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #5c8bff, #3866e6);
+  border: 1px solid rgb(255 255 255 / 22%);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 50%);
+  /* Sem transição: a haste tem de estar sob o dedo, não atrás dele. */
+  will-change: transform;
+}
+
+.fechar-controle {
+  font-size: 11.5px;
+  color: var(--txt-apagado);
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgb(14 19 30 / 62%);
+  border: 1px solid rgb(255 255 255 / 10%);
+}
+
+.lado-botoes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.lado-botoes .fila {
+  display: flex;
+  gap: 8px;
+}
+
+.bm {
+  min-width: 84px;
+  min-height: 46px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgb(20 26 38 / 88%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 40%);
+  touch-action: none;
+}
+
+.bm:active {
+  background: rgb(76 125 255 / 45%);
+  border-color: var(--acento);
+}
+
+.bm.direito {
+  background: rgb(28 35 49 / 92%);
+}
+
+/* O esquerdo é o mais usado de todos, e é o único que se segura: maior, mais
+   baixo e mais perto do canto, que é onde o polegar descansa. */
+.bm.esquerdo {
+  min-width: 176px;
+  min-height: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  font-size: 15px;
+  background: var(--acento);
+  border-color: var(--acento);
+  color: #fff;
+}
+
+.bm.esquerdo small {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.82;
+}
+
+/* Marcador do cursor: local e instantâneo. O cursor que vem dentro do vídeo
+   chega atrasado, e sem este círculo o joystick pareceria emperrado. */
+.marcador-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 12;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 50%;
+  border: 2px solid rgb(92 139 255 / 95%);
+  background: rgb(76 125 255 / 16%);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 55%), 0 0 12px rgb(76 125 255 / 45%);
+  pointer-events: none;
+}
+
+.marcador-cursor::after {
+  content: '';
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 45%);
+}
+
+/* ───────────────────────── teclado ───────────────────────── */
+
+.teclado {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  background: rgb(10 14 26 / 97%);
+  border-top: 1px solid var(--borda);
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.atalhos {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.atalhos button {
+  flex-shrink: 0;
+  min-height: 42px;
+  padding: 8px 13px;
+  border-radius: 10px;
+  background: var(--sup-alto);
+  border: 1px solid var(--borda);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.linha-digitar {
+  display: flex;
+  gap: 7px;
+}
+
+.campo-invisivel {
+  flex: 1;
+  min-height: 46px;
+  padding: 11px 13px;
+  border-radius: 11px;
+  background: var(--bg);
+  border: 1px solid var(--acento);
+  outline: none;
+}
+
+.linha-digitar .bt {
+  min-width: 52px;
+  min-height: 46px;
+  padding: 10px;
+}
+
+/* ───────────────────── cortinas e avisos ───────────────────── */
+
+.cortina {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(4 6 12 / 82%);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.caixa,
+.caixa-discando {
+  width: 100%;
+  max-width: 420px;
+  background: var(--sup);
+  border: 1px solid var(--borda);
+  border-radius: 18px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.caixa-discando {
+  align-items: center;
+  text-align: center;
+}
+
+.caixa h2 {
+  font-size: 18px;
+}
+
+.caixa p {
+  font-size: 13.5px;
+  color: var(--txt-fraco);
+  line-height: 1.6;
+}
+
+.caixa .par {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.caixa .par span {
+  font-size: 11.5px;
+  color: var(--txt-apagado);
+}
+
+.caixa .par code {
+  font-family: ui-monospace, monospace;
+  font-size: 14px;
+  letter-spacing: 1px;
+  padding: 8px 11px;
+  background: var(--bg);
+  border-radius: 9px;
+  user-select: text;
+}
+
+.caixa .botoes {
+  display: flex;
+  gap: 9px;
+  margin-top: 4px;
+}
+
+.caixa .botoes .bt {
+  flex: 1;
+}
+
+.numero-grande {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1.5px;
+}
+
+.etapa {
+  font-size: 13.5px;
+  color: var(--txt-fraco);
+}
+
+.giro {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid var(--borda);
+  border-top-color: var(--acento);
+  animation: girar 0.9s linear infinite;
+}
+
+@keyframes girar {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.passos {
+  display: flex;
+  gap: 6px;
+}
+
+.passo {
+  width: 26px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--borda);
+}
+
+.passo.feito {
+  background: var(--acento);
+}
+
+.avisos {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  pointer-events: none;
+}
+
+.aviso {
+  padding: 12px 14px;
+  border-radius: 11px;
+  font-size: 13px;
+  background: var(--sup-alto);
+  border: 1px solid var(--borda);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+}
+
+.aviso.erro {
+  border-color: var(--perigo);
+}
+
+.aviso.ok {
+  border-color: var(--ok);
+}
+
+/* ─────────── sessão instável, e proporções de tela ─────────── */
+
+.visualizador.instavel .palco video {
+  filter: grayscale(0.55) brightness(0.7);
+}
+
+.reconectando {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 52px);
+  left: 12px;
+  right: 12px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: 12px;
+  background: rgb(16 20 29 / 96%);
+  border: 1px solid var(--alerta);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--txt-fraco);
+}
+
+.reconectando strong {
+  color: var(--txt);
+}
+
+.giro-pequeno {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid var(--borda);
+  border-top-color: var(--alerta);
+  animation: girar 0.9s linear infinite;
+}
+
+/* ── deitado: é como se vê uma tela de computador no celular ──
+   Em paisagem a barra encolhe e some do caminho, porque a área útil vertical
+   é escassa e a tela remota é o que importa. */
+@media (orientation: landscape) {
+  .barra-sessao {
+    padding: 4px 8px;
+    gap: 5px;
+  }
+  .barra-sessao .bt {
+    min-height: 32px;
+    padding: 5px 10px;
+    font-size: 11.5px;
+  }
+  .barra-sessao .medidas {
+    display: none;
+  }
+  .teclado {
+    padding: 5px 8px calc(5px + env(safe-area-inset-bottom));
+  }
+  .atalhos button {
+    min-height: 36px;
+    padding: 6px 11px;
+  }
+  /* Deitado sobra largura e falta altura: o controle encolhe no eixo que
+     está apertado, senão a haste come metade da tela do computador. */
+  .controle-mouse {
+    padding-top: 6px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  }
+  .joystick {
+    width: 108px;
+    height: 108px;
+  }
+  .joystick .haste {
+    width: 48px;
+    height: 48px;
+  }
+  .bm {
+    min-height: 42px;
+  }
+  .bm.esquerdo {
+    min-height: 52px;
+  }
+  .fechar-controle {
+    display: none;
+  }
+}
+
+/* A barra da sessão precisa caber o botão de encerrar em qualquer aparelho.
+   As medidas são informação secundária e saem primeiro. */
+@media (max-width: 430px) {
+  .barra-sessao .medidas {
+    display: none;
+  }
+}
+
+/* Telas pequenas (até 360px de largura): o número não pode quebrar linha. */
+@media (max-width: 360px) {
+  .campo.numero {
+    font-size: 18px;
+    letter-spacing: 1px;
+  }
+  .inicio {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .cartao {
+    padding: 13px;
+  }
+  /* Aparelho estreito: a haste e os botões precisam caber lado a lado sem
+     empurrar um ao outro para fora da tela. */
+  .joystick {
+    width: 116px;
+    height: 116px;
+  }
+  .joystick .haste {
+    width: 52px;
+    height: 52px;
+  }
+  .bm {
+    min-width: 72px;
+    font-size: 12.5px;
+    padding: 8px 9px;
+  }
+  .bm.esquerdo {
+    min-width: 152px;
+  }
+}
+
+/* Telas grandes (tablet): a coluna para de esticar, senão os campos ficam
+   com dez centímetros de largura e o polegar não alcança as pontas. */
+@media (min-width: 620px) {
+  .inicio {
+    max-width: 560px;
+    width: 100%;
+    margin: 0 auto;
+  }
+}

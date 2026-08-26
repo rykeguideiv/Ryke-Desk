@@ -1,0 +1,11 @@
+{
+  "appId": "br.com.ryke.desk",
+  "appName": "Ryke Desk",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

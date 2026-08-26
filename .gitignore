@@ -19,6 +19,9 @@ servidor-vps/.env
 *.pem
 *.key
 *.snk
+# Android: a chave que assina o APK é um segredo do mesmo tamanho.
+*.jks
+*.keystore
 
 # Lixo de sistema operacional.
 .DS_Store

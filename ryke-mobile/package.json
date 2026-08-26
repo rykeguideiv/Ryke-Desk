@@ -1,0 +1,36 @@
+{
+  "name": "ryke-desk-mobile",
+  "version": "1.0.17",
+  "private": true,
+  "description": "Ryke Desk Mobile — acessa um PC a partir do Android",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/compat.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/auth-mobile.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/joystick.test.mjs",
+    "sync": "npm run build && cap sync android",
+    "apk": "npm run build && cap sync android && node build/apk.mjs",
+    "test:apk": "node test/apk.test.mjs",
+    "test:e2e": "npm run build && node test/e2e-mobile.mjs",
+    "test": "npm run test:unit && npm run test:e2e && npm run test:apk"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/filesystem": "^7.0.0",
+    "@capacitor/preferences": "^7.0.0",
+    "@noble/curves": "^2.3.0",
+    "@noble/hashes": "^2.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.1",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  }
+}

@@ -16,10 +16,14 @@
 #   e é o endereço que o README já dá a quem vai baixar.
 #
 # SOBRE O APK DO ANDROID
-#   O aplicativo de celular mora em outro projeto (`ryke-mobile/`), fora deste
-#   repositório, e é assinado com a chave de depuração do Android. Por isso ele
-#   não é compilado aqui: o APK é gerado localmente com `npm run apk` e anexado
-#   à Release à mão. Automatizá-lo exigiria trazer o projeto do celular para cá.
+#   O aplicativo de celular vive em `ryke-mobile/`, dentro deste repositório, e
+#   é compilado aqui junto com o instalador — a mesma tag entrega os dois.
+#
+#   Ele é assinado com a chave de DEPURAÇÃO do Android, que é pública e vem com
+#   o SDK. Isso basta para instalar pelo arquivo, e é o que permite compilá-lo
+#   num repositório aberto: uma chave de release é um segredo, e segredo não
+#   mora em repositório público. O custo é não poder publicar na Play Store com
+#   este APK.
 #
 # ANTES DE A ASSINATURA FUNCIONAR (uma vez só, depois que o SignPath aprovar)
 #   1. Em Settings → Secrets and variables → Actions, crie o segredo
@@ -101,12 +105,56 @@ jobs:
         with:
           files: assinado/*.exe
 
-  # Publica o instalador não assinado. Este job é a diferença entre uma tag que
-  # entrega um arquivo para o usuário baixar e uma tag que não produz nada
+  # ─────────────────────────── Android ───────────────────────────
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Instalar dependências do celular
+        working-directory: ryke-mobile
+        run: npm ci
+
+      - name: Conferir tipos e testes de unidade do celular
+        working-directory: ryke-mobile
+        run: npm run typecheck && npm run test:unit
+
+      - name: Compilar o APK
+        working-directory: ryke-mobile
+        run: |
+          npm run build
+          npx cap sync android
+          cd android && ./gradlew assembleDebug --no-daemon
+
+      - name: Dar ao APK um nome que diga o que ele é
+        run: |
+          mkdir -p apk
+          VERSAO=$(node -p "require('./ryke-mobile/package.json').version")
+          cp ryke-mobile/android/app/build/outputs/apk/debug/app-debug.apk "apk/RykeDesk-Mobile-$VERSAO.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ryke-desk-apk
+          path: apk/*.apk
+          if-no-files-found: error
+
+  # Publica o instalador e o APK. Este job é a diferença entre uma tag que
+  # entrega arquivos para o usuário baixar e uma tag que não produz nada
   # visível — que era o que acontecia enquanto o SignPath não estivesse
   # configurado.
   publicar:
-    needs: build
+    needs: [build, apk]
     if: ${{ startsWith(github.ref, 'refs/tags/') && vars.SIGNPATH_ORGANIZATION_ID == '' }}
     runs-on: ubuntu-latest
     steps:
@@ -115,14 +163,19 @@ jobs:
           name: ryke-desk-instalador
           path: entrega
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: ryke-desk-apk
+          path: entrega
+
       - uses: softprops/action-gh-release@v2
         with:
-          files: entrega/*.exe
+          files: entrega/*
           body: |
             ## Instalar
 
             **Windows:** baixe o `RykeDesk-Setup-*.exe` abaixo e execute. Atualizar é rodar o instalador de novo — ele fecha a versão aberta, remove a anterior e preserva número, senha e favoritos.
 
-            **Android:** o `RykeDesk-Mobile-*.apk` é anexado a esta Release à mão (o projeto do celular é compilado fora deste repositório). Baixe e abra no aparelho; será preciso permitir a instalação de fontes desconhecidas.
+            **Android:** baixe o `RykeDesk-Mobile-*.apk` e abra no aparelho. Será preciso permitir a instalação de fontes desconhecidas — o aplicativo não está na Play Store.
 
             > ⚠️ **Este instalador ainda NÃO está assinado.** O Windows vai mostrar o aviso do SmartScreen — clique em *Mais informações* → *Executar assim mesmo*. A assinatura pelo [SignPath Foundation](https://signpath.org/) entra assim que o projeto for aprovado, e a partir dali o aviso desaparece.
