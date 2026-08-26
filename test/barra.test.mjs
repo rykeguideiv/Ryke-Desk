@@ -24,6 +24,9 @@ import {
   FAIXA_DA_BARRA,
   FAIXA_COM_ABAS,
   FOLGA_JANELA,
+  ALCANCE_JANELADO,
+  FAIXA_JANELADO,
+  FAIXA_JANELADO_COM_ABAS,
 } from '../src/renderer/src/lib/barra.ts';
 
 let falhas = 0;
@@ -132,6 +135,52 @@ console.log('\n── com abas, a barra desce e a faixa acompanha ──\n');
     decidirBarra(true, 80, NA_TELA) === false);
   check('abaixo da barra de menu inteira, fecha',
     decidirBarra(true, FAIXA_COM_ABAS + 1, NA_TELA, FAIXA_COM_ABAS) === false);
+}
+
+console.log('\n── modo janela: o gesto muda porque a borda do monitor some ──\n');
+
+{
+  // O DEFEITO RELATADO: "cliquei em Janela, ficou num tamanho bom, porem nao
+  // aparece mais o menu superior nem passando em cima, e nao consigo nem sair
+  // do modo janela".
+  //
+  // A CAUSA: encostar em 2px so e um alvo razoavel com a janela colada no alto
+  // do monitor, porque ai o sistema PRENDE o cursor na borda. Solta no meio da
+  // tela esse apoio nao existe -- seria preciso acertar dois pixels com a mao,
+  // e o mouse andando depressa nem gera evento dentro deles. A barra, que e
+  // quem tem o botao de sair do modo, ficava inalcancavel.
+  check('numa janela solta, 2px continuaria sendo um alvo impossivel de acertar',
+    decidirBarra(false, 12, NA_TELA) === false,
+    '12px do topo, com a regra antiga: nao abre');
+  check('passar pela faixa de arrastar abre',
+    decidirBarra(false, 12, NA_TELA, FAIXA_JANELADO, ALCANCE_JANELADO) === true,
+    `12px, dentro do alcance de ${ALCANCE_JANELADO}`);
+  check('a borda de baixo da faixa de arrastar ainda abre',
+    decidirBarra(false, ALCANCE_JANELADO, NA_TELA, FAIXA_JANELADO, ALCANCE_JANELADO) === true);
+  check('um pixel abaixo dela ja nao abre sozinha',
+    decidirBarra(false, ALCANCE_JANELADO + 1, NA_TELA, FAIXA_JANELADO, ALCANCE_JANELADO) === false);
+
+  // Aberta, o cursor precisa conseguir DESCER ate os botoes, que no modo
+  // janela ficam mais abaixo por causa da faixa de arrastar.
+  check('descer da faixa ate os botoes nao fecha',
+    decidirBarra(true, 70, NA_TELA, FAIXA_JANELADO, ALCANCE_JANELADO) === true,
+    `70px, dentro da faixa de ${FAIXA_JANELADO}`);
+  check('e na faixa normal esse ponto fecharia',
+    decidirBarra(true, 70, NA_TELA) === false);
+  check('abaixo da barra inteira, fecha',
+    decidirBarra(true, FAIXA_JANELADO + 1, NA_TELA, FAIXA_JANELADO, ALCANCE_JANELADO) === false);
+
+  check('com abas no modo janela a faixa e ainda maior',
+    decidirBarra(true, 120, NA_TELA, FAIXA_JANELADO_COM_ABAS, ALCANCE_JANELADO) === true,
+    `120px, dentro de ${FAIXA_JANELADO_COM_ABAS}`);
+
+  // O meio da tela nunca abre a barra, em nenhum dos modos -- senao ela
+  // viveria aberta por cima da tela remota.
+  const meio = [200, 400, 600].filter(
+    (y) => decidirBarra(false, y, NA_TELA, FAIXA_JANELADO, ALCANCE_JANELADO) === true,
+  );
+  check('o meio da tela continua sem abrir nada', meio.length === 0,
+    meio.length ? `abriu em ${meio.join(', ')}` : 'nenhuma vez');
 }
 
 console.log(falhas === 0 ? '\nBarra da sessao validada.\n' : `\n${falhas} falha(s).\n`);

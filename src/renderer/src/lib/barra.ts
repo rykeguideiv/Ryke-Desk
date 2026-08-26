@@ -34,6 +34,23 @@
 export const ENCOSTOU_NO_TOPO = 2;
 
 /**
+ * O mesmo gesto, numa janela solta: a altura inteira da faixa de arrastar.
+ *
+ * Dois pixels só é um alvo razoável porque, com a janela colada no alto do
+ * monitor, o sistema PRENDE o cursor na borda — dá para jogar o mouse para
+ * cima com força que ele para exatamente lá. Numa janela no meio da tela esse
+ * apoio não existe: seria preciso acertar dois pixels com a mão, e o mouse
+ * andando depressa nem gera evento dentro deles. Na prática a barra ficava
+ * inalcançável, e como é ela que tem o botão de sair do modo janela, a pessoa
+ * ficava sem saída.
+ *
+ * A faixa de arrastar resolve isso sendo um alvo visível de 30 pixels: passar
+ * por cima dela abre a barra. Este número acompanha a altura dela no CSS
+ * (`.barra-arrastar`).
+ */
+export const ALCANCE_JANELADO = 30;
+
+/**
  * Faixa que a barra flutuante ocupa (8px de margem + ~44 de altura, com folga).
  * Dentro dela o estado não muda — é a histerese que impede a barra de fechar
  * no primeiro pixel de descida, antes de o cursor alcançar os botões.
@@ -55,6 +72,17 @@ export const FOLGA_JANELA = 10;
 export const FAIXA_COM_ABAS = 108;
 
 /**
+ * As mesmas faixas, empurradas pela faixa de arrastar do modo janela.
+ *
+ * No modo janela a barra de menu desce 38 pixels para não ficar embaixo da
+ * faixa de arrastar (ver styles.css). A faixa que a mantém aberta precisa
+ * descer junto, senão o cursor a perde no caminho até os botões — que é o
+ * mesmo defeito que a `FAIXA_COM_ABAS` existe para corrigir.
+ */
+export const FAIXA_JANELADO = 92;
+export const FAIXA_JANELADO_COM_ABAS = 138;
+
+/**
  * O novo estado da barra, dado onde o cursor está.
  *
  * `screenY` entra como segunda chance para o caso de a janela estar alguns
@@ -69,8 +97,9 @@ export function decidirBarra(
   clientY: number,
   screenY: number,
   faixa: number = FAIXA_DA_BARRA,
+  alcance: number = ENCOSTOU_NO_TOPO,
 ): boolean {
-  if (clientY <= ENCOSTOU_NO_TOPO) return true;
+  if (clientY <= alcance) return true;
   if (screenY <= 1 && clientY <= FOLGA_JANELA) return true;
   if (clientY > faixa) return false;
   return aberta;

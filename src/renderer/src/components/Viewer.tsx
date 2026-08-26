@@ -3,14 +3,20 @@ import { formatId, formatBytes } from '../../../shared/protocol';
 import { COMBOS } from '../../../shared/keymap';
 import { pointerToFraction, wheelToTicks, type Fraction } from '../lib/geometry';
 import { corDoPonteiro, cursorCssDaSeta, svgDaSeta, type Ponteiro } from '../../../shared/ponteiros';
-import { decidirBarra, FAIXA_COM_ABAS } from '../lib/barra';
+import {
+  ALCANCE_JANELADO,
+  decidirBarra,
+  FAIXA_COM_ABAS,
+  FAIXA_JANELADO,
+  FAIXA_JANELADO_COM_ABAS,
+} from '../lib/barra';
 import type { Controller, Outgoing, State } from '../lib/controller';
 import type { Quality } from '../lib/session';
 import type { TransferView } from '../lib/files';
 import {
   IconMonitor, IconKeyboard, IconFiles, IconFullscreen, IconExitFullscreen, IconJanela,
   IconPower, IconGrip, IconX, IconArrowUp, IconArrowDown, IconFolder, IconLock, IconSend,
-  IconMinus, IconShield, IconPlus, IconGamepad, IconEscape,
+  IconMinus, IconShield, IconPlus, IconGamepad, IconEscape, IconSquare,
 } from './icons';
 import { NovaConexao } from './Modals';
 
@@ -89,6 +95,24 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [maximizada, setMaximizada] = useState(true);
+  /**
+   * A sessão está numa janela solta, no meio da tela?
+   *
+   * Isto muda duas regras, e as duas por causa da mesma coisa: sem moldura e
+   * sem encostar na borda do monitor, a janela perde os dois gestos que a
+   * interface inteira assumia existir.
+   *
+   *   1. A barra deixa de se esconder. Ela abre quando o cursor ENCOSTA no
+   *      topo, e encostar só é um gesto confiável quando o sistema prende o
+   *      cursor na borda da tela — coisa que só acontece com a janela colada
+   *      lá em cima. Numa janela solta é preciso acertar dois pixels com a
+   *      mão, e errar significa ficar sem nenhum caminho para sair do modo.
+   *
+   *   2. Aparece uma faixa para arrastar. A janela não tem moldura: sem essa
+   *      faixa não há por onde pegá-la para mudá-la de lugar.
+   */
+  const janelado = !fullscreen && !maximizada;
   const [showDrawer, setShowDrawer] = useState(false);
   const [toolbarVisible, setToolbarVisible] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -260,6 +284,20 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   // Acompanha o estado real da trava do ponteiro: Alt+Tab, foco perdido ou a
   // saída pelo próprio sistema soltam a trava por fora, e a interface precisa
   // refletir isso (mostrar o aviso "clique para jogar").
+  // O estado da janela vem do processo principal: maximizar pelo atalho do
+  // Windows, restaurar com dois cliques na barra ou o botão Janela daqui
+  // passam todos por lá, e a interface precisa acompanhar qualquer um deles.
+  useEffect(() => {
+    void window.ryke.window.state().then((s) => {
+      setMaximizada(s.maximized);
+      setFullscreen(s.fullscreen);
+    });
+    return window.ryke.window.onState((s) => {
+      setMaximizada(s.maximized);
+      setFullscreen(s.fullscreen);
+    });
+  }, []);
+
   useEffect(() => {
     const aoMudar = (): void => setTravado(document.pointerLockElement === videoRef.current);
     document.addEventListener('pointerlockchange', aoMudar);
@@ -663,11 +701,23 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
    * abas ou a própria barra de menu. A regra em si vive em lib/barra.ts.
    */
   const revelarBarra = useCallback((e: React.PointerEvent): void => {
-    // Com abas, a barra de menu fica mais abaixo (sob a barra de abas), então a
-    // faixa que a mantém aberta precisa alcançar os botões na nova posição.
-    const faixa = state.abas.length > 1 ? FAIXA_COM_ABAS : undefined;
-    setToolbarVisible((aberta) => decidirBarra(aberta, e.clientY, e.screenY, faixa));
-  }, [state.abas.length]);
+    // Duas coisas mudam a geometria daqui, e as duas empurram a barra de menu
+    // para baixo: a barra de abas (com duas ou mais conexões) e a faixa de
+    // arrastar (no modo janela). A faixa que mantém a barra aberta precisa
+    // alcançar os botões na posição nova, senão o cursor os perde no caminho.
+    const comAbas = state.abas.length > 1;
+    const faixa = janelado
+      ? comAbas
+        ? FAIXA_JANELADO_COM_ABAS
+        : FAIXA_JANELADO
+      : comAbas
+        ? FAIXA_COM_ABAS
+        : undefined;
+    // E no modo janela o gesto que abre é passar pela faixa de arrastar, não
+    // encostar em dois pixels — ver ALCANCE_JANELADO em lib/barra.ts.
+    const alcance = janelado ? ALCANCE_JANELADO : undefined;
+    setToolbarVisible((aberta) => decidirBarra(aberta, e.clientY, e.screenY, faixa, alcance));
+  }, [state.abas.length, janelado]);
 
   /** O ponteiro está travado no vídeo agora? (Modo Gamer em jogo.) */
   const jogando = (video: HTMLVideoElement): boolean =>
@@ -798,7 +848,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       ref={containerRef}
       className={`viewer ${dragging ? 'dragging' : ''} ${outgoing.instavel ? 'instavel' : ''} ${
         state.abas.length > 1 ? 'tem-abas' : ''
-      } ${travado ? 'jogando' : ''}`}
+      } ${travado ? 'jogando' : ''} ${janelado ? 'janelado' : ''}`}
       onPointerMove={revelarBarra}
       onDragOver={(e) => {
         e.preventDefault();
@@ -985,6 +1035,45 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
           dangerouslySetInnerHTML={{ __html: svgDaSeta(corDoPonteiro(ponteiro.cor), ponteiro.nome) }}
         />
       ))}
+
+      {/* A faixa de arrastar, só no modo janela.
+
+          A janela não tem moldura — quem desenha a barra de título é a própria
+          interface. Em tela cheia isso não faz falta, mas numa janela solta é
+          a diferença entre poder pôr a sessão onde se quer e ficar preso com
+          ela no meio da tela. Os botões ficam fora da área de arrasto: uma
+          região `drag` engole o clique antes de ele virar clique. */}
+      {janelado && !conectandoNestaAba && (
+        <div className="barra-arrastar">
+          <span className="barra-arrastar-nome">{outgoing.meta?.hostName ?? formatId(outgoing.peerId)}</span>
+          <div className="barra-arrastar-botoes">
+            <button
+              onClick={() => window.ryke.window.minimize()}
+              title="Minimizar"
+              aria-label="Minimizar"
+            >
+              <IconMinus />
+            </button>
+            <button
+              onClick={() => window.ryke.window.toggleMaximize()}
+              title="Maximizar de volta"
+              aria-label="Maximizar de volta"
+            >
+              <IconSquare />
+            </button>
+            <button
+              onClick={() => {
+                setFullscreen(true);
+                window.ryke.window.fullscreen(true);
+              }}
+              title="Tela cheia (Ctrl+Alt+Shift+F)"
+              aria-label="Tela cheia"
+            >
+              <IconFullscreen />
+            </button>
+          </div>
+        </div>
+      )}
 
       <Toolbar
         controller={controller}

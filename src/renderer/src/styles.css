@@ -2414,3 +2414,80 @@ button {
 .viewer.jogando .seta-visitante {
   display: none;
 }
+
+/* A faixa de arrastar do modo janela.
+
+   Existe porque a janela é sem moldura: sem ela, uma sessão em janela solta
+   não tem por onde ser pega e fica cravada onde nasceu. `-webkit-app-region:
+   drag` é o que entrega o arrasto ao gerenciador de janelas do Windows — o
+   mesmo mecanismo da barra de título do restante do aplicativo. */
+.barra-arrastar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 0 12px;
+  background: rgb(12 16 24 / 88%);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.barra-arrastar-nome {
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Fora da área de arrasto: uma região `drag` engole o clique antes de ele
+   chegar ao botão, e os três ficariam decorativos. */
+.barra-arrastar-botoes {
+  display: flex;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.barra-arrastar-botoes button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.barra-arrastar-botoes button:hover {
+  background: rgb(255 255 255 / 10%);
+  color: var(--text);
+}
+
+.barra-arrastar-botoes svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* A barra de menu desce para não ficar embaixo da faixa de arrasto. */
+.viewer.janelado .toolbar {
+  margin-top: 38px;
+}
+
+.viewer.janelado.tem-abas .toolbar {
+  margin-top: 76px;
+}
+
+/* E a barra de abas também. */
+.viewer.janelado .barra-abas {
+  top: 30px;
+}
