@@ -171,9 +171,19 @@ const api = {
       ipcRenderer.send('input:wheel', peerId, dx, dy, fx, fy),
     key: (code: string, down: boolean) => ipcRenderer.send('input:key', code, down),
     combo: (codes: string[]) => ipcRenderer.send('input:combo', codes),
+    /** Ctrl+Alt+Del: caminho próprio, e com resposta. Ver src/main/sas.ts. */
+    sas: () => ipcRenderer.invoke('input:sas') as Promise<{ ok: boolean; motivo: string }>,
     text: (value: string) => ipcRenderer.send('input:text', value),
     releaseAll: () => ipcRenderer.send('input:release'),
     blockLocal: (on: boolean) => ipcRenderer.invoke('input:block', on) as Promise<boolean>,
+  },
+
+  /** A política do Windows que permite Ctrl+Alt+Del remoto. Ver src/main/sas.ts. */
+  sas: {
+    estado: () =>
+      ipcRenderer.invoke('sas:estado') as Promise<{ elevado: boolean; liberado: boolean; disponivel: boolean }>,
+    permitir: (ligar: boolean) =>
+      ipcRenderer.invoke('sas:permitir', ligar) as Promise<{ ok: boolean; motivo: string }>,
   },
 
   clipboard: {

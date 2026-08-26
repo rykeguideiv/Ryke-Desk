@@ -1316,6 +1316,23 @@ export class Controller {
     this.viewer?.sendCombo(codes);
   }
 
+  /**
+   * Ctrl+Alt+Del no computador remoto.
+   *
+   * Separado de `sendCombo` porque não é injeção de tecla: vai pela API
+   * SendSAS do outro lado, que pode recusar. A resposta vira aviso na tela —
+   * o defeito que isto corrige era um botão que falhava em silêncio.
+   */
+  sendSas(): void {
+    const sessao = this.viewer;
+    if (!sessao) return;
+    const solta = sessao.on('sas', (r) => {
+      solta();
+      this.toast(r.ok ? 'ok' : 'erro', r.motivo);
+    });
+    sessao.sendSas();
+  }
+
   /** Arquivos arrastados para dentro da janela. */
   sendDroppedFiles(files: FileList | File[]): void {
     const session = this.active;

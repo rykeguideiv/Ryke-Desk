@@ -101,6 +101,20 @@ export type Settings = {
    * virtual, porque para o Windows ele não existe.
    */
   setasIndependentes: boolean;
+  /**
+   * Deixar que quem se conectar dispare Ctrl+Alt+Del neste computador.
+   *
+   * Desligado por padrão porque ligá-lo mexe numa política do Windows
+   * (`SoftwareSASGeneration`), e mexer em política de segurança da máquina é
+   * decisão de quem é dono dela — não de quem está do outro lado.
+   *
+   * O que muda ao ligar, sem meias palavras: um programa elevado passa a poder
+   * CHAMAR a tela de segurança do Windows. Ele não passa a poder imitá-la nem
+   * a ler o que se digita nela — quem a desenha continua sendo o Winlogon, na
+   * área de trabalho segura, fora do alcance de qualquer programa. Desligar
+   * devolve a política ao estado anterior.
+   */
+  permitirSasRemoto: boolean;
   /** Nome exibido a quem se conectar. */
   displayName: string;
   /**

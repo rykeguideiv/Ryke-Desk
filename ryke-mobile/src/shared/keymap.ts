@@ -106,8 +106,16 @@ export const MODIFIER_CODES = [
 ] as const;
 
 /** Combinações oferecidas na barra de ferramentas do visitante. */
+/**
+ * Ctrl+Alt+Del NÃO está nesta lista, e não é esquecimento.
+ *
+ * Tudo aqui é injetado com SendInput, e SendInput nunca produz a Secure
+ * Attention Sequence — o Windows a intercepta antes de qualquer processo em
+ * modo usuário. Enquanto ela esteve nesta lista, o botão existia, o clique
+ * acontecia e nada chegava do outro lado. Agora ela tem caminho próprio
+ * (a API SendSAS) e botão próprio na barra. Ver src/main/sas.ts.
+ */
 export const COMBOS: { label: string; hint: string; codes: string[] }[] = [
-  { label: 'Ctrl+Alt+Del', hint: 'Tela de segurança do Windows', codes: ['ControlLeft', 'AltLeft', 'Delete'] },
   { label: 'Alt+Tab', hint: 'Alternar janelas', codes: ['AltLeft', 'Tab'] },
   { label: 'Win', hint: 'Menu Iniciar', codes: ['MetaLeft'] },
   { label: 'Win+D', hint: 'Mostrar a área de trabalho', codes: ['MetaLeft', 'KeyD'] },

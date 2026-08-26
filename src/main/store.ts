@@ -76,6 +76,7 @@ function defaults(): Settings {
     hostOnLaunch: true,
     blockLocalInput: false,
     setasIndependentes: true,
+    permitirSasRemoto: false,
     displayName: process.env.COMPUTERNAME ?? 'Meu computador',
     turnUrl: '',
     turnUser: '',

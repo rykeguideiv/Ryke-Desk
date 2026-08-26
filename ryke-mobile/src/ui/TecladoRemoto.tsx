@@ -32,7 +32,6 @@ const ATALHOS: [string, string, string[]][] = [
   ['Ctrl+Z', 'desfazer', ['ControlLeft', 'KeyZ']],
   ['Alt+Tab', 'trocar janela', ['AltLeft', 'Tab']],
   ['Win', 'menu iniciar', ['MetaLeft']],
-  ['Ctrl+Alt+Del', 'seguranca', ['ControlLeft', 'AltLeft', 'Delete']],
 ];
 
 export function TecladoRemoto({ sessao, onFechar }: { sessao: Sessao; onFechar: () => void }): React.JSX.Element {
@@ -50,6 +49,13 @@ export function TecladoRemoto({ sessao, onFechar }: { sessao: Sessao; onFechar: 
             {rotulo}
           </button>
         ))}
+        {/* Fora da lista acima porque não é injeção de tecla: o Windows reserva
+            o Ctrl+Alt+Del e nenhum programa consegue simulá-lo. Este botão pede
+            a chamada oficial (SendSAS) do outro lado, que pode recusar — e a
+            recusa vira aviso na tela em vez de silêncio. */}
+        <button title="tela de seguranca do Windows" onClick={() => sessao.sas()}>
+          Ctrl+Alt+Del
+        </button>
       </div>
 
       <div className="linha-digitar">

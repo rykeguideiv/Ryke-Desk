@@ -266,8 +266,22 @@ export type CtrlGamer = { t: 'gamer'; on: boolean };
 
 /** `code` é o KeyboardEvent.code — posição física da tecla, não o caractere. */
 export type CtrlKey = { t: 'kd' | 'ku'; code: string; repeat?: boolean };
-/** Combinação disparada por botão da barra (Ctrl+Alt+Del, Alt+Tab, ...). */
+/** Combinação disparada por botão da barra (Alt+Tab, Win+E, ...). */
 export type CtrlCombo = { t: 'combo'; codes: string[] };
+
+/**
+ * Ctrl+Alt+Del — que NÃO é uma combinação como as outras.
+ *
+ * As demais viajam em `combo` e são injetadas com SendInput. Esta não pode:
+ * o Windows intercepta a Secure Attention Sequence antes de qualquer processo
+ * em modo usuário, e é essa reserva que garante que a tela de bloqueio seja
+ * mesmo dele. Nenhum privilégio contorna isso — por isso a mensagem é
+ * separada, e do outro lado ela vai para a API `SendSAS`, que é a porta
+ * oficial. Ver src/main/sas.ts.
+ */
+export type CtrlSas = { t: 'sas' };
+/** O que aconteceu com o pedido acima. Sem isto o botão falharia calado. */
+export type CtrlSasResult = { t: 'sas-result'; ok: boolean; motivo: string };
 /** Texto literal, usado para colar acentuação e emojis sem depender de layout. */
 export type CtrlText = { t: 'text'; value: string };
 
@@ -346,6 +360,8 @@ export type CtrlMessage =
   | CtrlWheel
   | CtrlKey
   | CtrlCombo
+  | CtrlSas
+  | CtrlSasResult
   | CtrlText
   | CtrlClipboard
   | CtrlDisplay

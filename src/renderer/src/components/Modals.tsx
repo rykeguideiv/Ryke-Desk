@@ -412,6 +412,20 @@ export function SettingsModal({
   onClose: () => void;
 }): React.JSX.Element {
   const settings = state.settings!;
+  /**
+   * O que o WINDOWS diz sobre o Ctrl+Alt+Del remoto — não o que preferimos.
+   *
+   * Lido do sistema ao abrir os Ajustes, porque a política pode ter sido
+   * mudada por fora (política de grupo, outro programa, o próprio usuário no
+   * regedit). Mostrar a preferência guardada em vez do estado real produziria
+   * uma caixinha marcada com o recurso desligado por baixo.
+   */
+  const [sasEstado, setSasEstado] = useState<{ elevado: boolean; liberado: boolean; disponivel: boolean } | null>(null);
+  const [sasAviso, setSasAviso] = useState<string | null>(null);
+  useEffect(() => {
+    void window.ryke.sas.estado().then(setSasEstado);
+  }, []);
+
   const [serverUrl, setServerUrl] = useState(settings.serverUrl);
   const [turnUrl, setTurnUrl] = useState(settings.turnUrl);
   const [turnUser, setTurnUser] = useState(settings.turnUser);
@@ -598,6 +612,45 @@ export function SettingsModal({
           />
           <span className="switch-track" />
         </label>
+
+        {/* Ctrl+Alt+Del remoto.
+
+            Não é uma preferência do programa: ligar mexe numa política do
+            WINDOWS (`SoftwareSASGeneration`). Por isso o interruptor mostra o
+            que o sistema respondeu, e não o que o usuário clicou — marcar a
+            caixinha e o Windows recusar por baixo seria a pior das situações,
+            com o botão do outro lado falhando sem ninguém entender por quê. */}
+        <label className="switch setting-row">
+          <div className="switch-text">
+            <strong>Permitir Ctrl+Alt+Del remoto</strong>
+            <span>
+              Sem isto, o botão Ctrl+Alt+Del de quem se conecta não faz nada — o Windows reserva essa combinação e
+              nenhum programa consegue simulá-la. Ligar libera a chamada oficial do Windows para ela.{' '}
+              {sasEstado && !sasEstado.elevado && (
+                <strong>Precisa abrir o Ryke Desk como administrador para mexer nisto.</strong>
+              )}
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={sasEstado ? sasEstado.liberado : settings.permitirSasRemoto === true}
+            disabled={sasEstado !== null && !sasEstado.elevado}
+            onChange={(e) => {
+              const ligar = e.target.checked;
+              void window.ryke.sas.permitir(ligar).then((r) => {
+                setSasAviso(r.motivo);
+                void window.ryke.sas.estado().then(setSasEstado);
+                // A tela só reflete o que o Windows aceitou de fato.
+                // Sincroniza a tela com o que o Windows aceitou. Quem grava de
+                // verdade é o processo principal, junto da política; isto só
+                // traz o valor de volta para o estado da interface.
+                if (r.ok) void controller.updateSettings({ permitirSasRemoto: ligar });
+              });
+            }}
+          />
+          <span className="switch-track" />
+        </label>
+        {sasAviso && <span className="hint" style={{ marginTop: -6 }}>{sasAviso}</span>}
 
         <label className="switch setting-row">
           <div className="switch-text">

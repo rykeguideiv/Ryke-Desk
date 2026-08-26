@@ -48,6 +48,14 @@ export type MetaAnfitriao = {
 const PULSO_MS = 3000;
 
 export type EventosSessao = {
+  /**
+   * O que o computador respondeu ao pedido de Ctrl+Alt+Del.
+   *
+   * Existe porque este pedido pode ser RECUSADO: ele depende de uma política
+   * do Windows que vem desligada. Sem a resposta, o botão falharia calado —
+   * que era exatamente o defeito.
+   */
+  sas: (r: { ok: boolean; motivo: string }) => void;
   stream: (stream: MediaStream) => void;
   /**
    * A sessão está viva de verdade, ou só parece?
@@ -107,6 +115,7 @@ export class Sessao {
   streamRemoto: MediaStream | null = null;
 
   private ouvintes: { [K in keyof EventosSessao]: EventosSessao[K][] } = {
+    sas: [],
     stream: [], stats: [], meta: [], pronta: [], encerrada: [], saude: [],
   };
 
@@ -270,6 +279,10 @@ export class Sessao {
       this.enviarCtrl({ t: 'pong', at: msg.at, q: this.ultimoQuadro });
       return;
     }
+    if (msg.t === 'sas-result') {
+      this.emitir('sas', { ok: msg.ok, motivo: msg.motivo });
+      return;
+    }
     if (msg.t === 'meta') {
       this.emitir('meta', {
         width: msg.width,
@@ -327,6 +340,18 @@ export class Sessao {
   }
   combinacao(codes: string[]): void {
     this.enviarCtrl({ t: 'combo', codes });
+  }
+
+  /**
+   * Ctrl+Alt+Del — que não é uma combinação como as outras.
+   *
+   * As demais são injetadas com SendInput no computador. Esta não pode ser: o
+   * Windows intercepta a Secure Attention Sequence antes de qualquer programa,
+   * e é essa reserva que garante que a tela de bloqueio seja mesmo dele. Do
+   * outro lado, este pedido vai para a API oficial (SendSAS).
+   */
+  sas(): void {
+    this.enviarCtrl({ t: 'sas' });
   }
   /** Texto literal: é assim que acentos e emojis chegam sem depender de layout. */
   texto(valor: string): void {

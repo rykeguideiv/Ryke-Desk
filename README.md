@@ -258,11 +258,33 @@ necessário — e mesmo em tela cheia dá para mandá-lo pelo menu *Teclas*.
 O gancho sai no instante em que a janela perde o foco, e some junto com a
 sessão. Nada de teclado sequestrado com o programa em segundo plano.
 
-**Ctrl+Alt+Del continua sendo exceção**, e não por descuido: o Windows entrega
-essa combinação direto ao Winlogon, num caminho que nenhum programa comum
-alcança — é o que garante que a tela de bloqueio seja mesmo do Windows, e não
-de um impostor. Por isso existe o botão dela no menu *Teclas*: ele injeta a
-combinação do outro lado, que é onde ela precisa acontecer.
+### Ctrl+Alt+Del
+
+Tem botão próprio na barra, e não fica junto das outras combinações — porque
+não é uma combinação como as outras.
+
+O Windows intercepta o Ctrl+Alt+Del antes de qualquer programa em modo
+usuário, num caminho reservado ao Winlogon. **Nenhum privilégio contorna
+isso**, e isso não é defeito: é o que garante que a tela de bloqueio seja mesmo
+do Windows, e não de um impostor pedindo a sua senha. Durante um tempo o Ryke
+Desk mandou essa combinação pelo mesmo caminho das outras teclas, e o resultado
+foi um botão que não fazia nada e não dizia nada.
+
+A porta oficial é a API `SendSAS`, e ela exige que o computador acessado
+libere: **Ajustes → Permitir Ctrl+Alt+Del remoto**. Isso liga a política
+`SoftwareSASGeneration` do Windows, que vem desligada — e é decisão de quem é
+dono da máquina, não de quem está do outro lado, por isso o programa não a liga
+sozinho.
+
+O que muda ao ligar, com todas as letras: um programa elevado passa a poder
+**chamar** a tela de segurança do Windows. Ele não passa a poder imitá-la nem a
+ler o que se digita nela — quem a desenha continua sendo o Winlogon, na área de
+trabalho segura, fora do alcance de qualquer programa. Desligar devolve a
+política ao estado anterior. É o mesmo mecanismo que todo programa de acesso
+remoto usa para isto.
+
+Enquanto não estiver liberado, o botão **diz o motivo** em vez de falhar
+calado.
 
 ## Modo Gamer
 

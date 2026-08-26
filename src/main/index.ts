@@ -30,6 +30,7 @@ import {
 } from './auth';
 import * as input from './input';
 import * as tecladoGlobal from './teclado-global';
+import { definirPoliticaSas, enviarSas, estadoSas } from './sas';
 import { listDisplays, findDisplay, toPhysicalPoint, toFraction } from './screen';
 import { ipLocal } from './network';
 import { copiarArquivos, lerArquivosCopiados } from './clipboard-arquivos';
@@ -1144,6 +1145,41 @@ function registerIpc(): void {
   });
   ipcMain.on('input:key', (_e, code: string, down: boolean) => input.key(code, down));
   ipcMain.on('input:combo', (_e, codes: string[]) => input.combo(codes));
+
+  /**
+   * Ctrl+Alt+Del. Fora do caminho das outras teclas de propósito — ver sas.ts.
+   *
+   * `handle`, e não `on`, porque este é o único atalho cujo resultado precisa
+   * voltar: ele depende de uma política do Windows que pode estar desligada, e
+   * o defeito que isto corrige era justamente o botão não fazer nem dizer nada.
+   */
+  ipcMain.handle('input:sas', () => {
+    if (!store.getSettings().permitirSasRemoto) {
+      return {
+        ok: false,
+        motivo:
+          'O outro computador ainda não liberou o Ctrl+Alt+Del remoto. Lá, em Ajustes, ligue "Permitir Ctrl+Alt+Del remoto".',
+      };
+    }
+    return enviarSas();
+  });
+
+  /** Estado da política, para os Ajustes mostrarem a verdade e não a intenção. */
+  ipcMain.handle('sas:estado', () => estadoSas());
+
+  /**
+   * Liga/desliga a política do Windows junto com a preferência.
+   *
+   * As duas andam juntas porque separá-las produziria a pior das situações: a
+   * caixinha marcada nos Ajustes e o Windows recusando na hora do aperto, sem
+   * ninguém entender por quê.
+   */
+  ipcMain.handle('sas:permitir', (_e, ligar: boolean) => {
+    const r = definirPoliticaSas(ligar);
+    // Só grava a preferência se o Windows aceitou de fato.
+    if (r.ok) store.saveSettings({ permitirSasRemoto: ligar });
+    return r;
+  });
   ipcMain.on('input:text', (_e, text: string) => input.typeText(text));
   ipcMain.on('input:release', () => input.releaseAll());
 
@@ -1267,6 +1303,16 @@ function registerIpc(): void {
    */
   ipcMain.on('window:janela', () => {
     if (!mainWindow) return;
+
+    // ALTERNA. Só encolher fazia do botão um caminho de mão única: uma vez em
+    // janela, apertá-lo de novo repetia o mesmo encolhimento e a sessão nunca
+    // voltava a ocupar a tela. Quem já está solto quer o contrário.
+    if (!mainWindow.isFullScreen() && !mainWindow.isMaximized()) {
+      mainWindow.maximize();
+      send('window:state', windowState());
+      return;
+    }
+
     if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false);
     if (mainWindow.isMaximized()) mainWindow.unmaximize();
 

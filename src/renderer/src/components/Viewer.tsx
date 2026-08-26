@@ -1089,9 +1089,12 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         onJanela={() => {
           // O estado local precisa acompanhar: sem isto o botão de tela cheia
           // continuaria mostrando "sair da tela cheia" numa janela que já saiu.
+          // O resto chega pelo evento `window:state` do processo principal, que
+          // é quem sabe se o clique encolheu ou maximizou de volta.
           setFullscreen(false);
           window.ryke.window.janela();
         }}
+        janelado={janelado}
         onMinimize={sairDaSessao}
         onToggleDrawer={() => setShowDrawer((v) => !v)}
         onNovaConexao={() => setNovaConexao(true)}
@@ -1138,6 +1141,7 @@ function Toolbar({
   pendingTransfers,
   onToggleFullscreen,
   onJanela,
+  janelado,
   onMinimize,
   onToggleDrawer,
   onNovaConexao,
@@ -1156,6 +1160,8 @@ function Toolbar({
   pendingTransfers: number;
   onToggleFullscreen: () => void;
   onJanela: () => void;
+  /** A sessão está numa janela solta? Muda o que o botão Janela faz e diz. */
+  janelado: boolean;
   onMinimize: () => void;
   onToggleDrawer: () => void;
   onNovaConexao: () => void;
@@ -1286,7 +1292,7 @@ function Toolbar({
 
       <button
         className="tool"
-        onClick={() => controller.sendCombo(['ControlLeft', 'AltLeft', 'Delete'])}
+        onClick={() => controller.sendSas()}
         data-dica="Manda Ctrl+Alt+Del para o computador remoto. A tecla física do seu teclado nunca chega lá — o Windows reserva essa combinação para o computador em uso, por isso ela precisa vir daqui."
       >
         <IconShield />
@@ -1371,12 +1377,16 @@ function Toolbar({
           e a partir dali é o usuário quem decide o tamanho, arrastando as
           bordas. É o que permite olhar a tela remota ao lado de algo daqui. */}
       <button
-        className="tool"
+        className={`tool ${janelado ? 'on' : ''}`}
         onClick={onJanela}
-        data-dica="Encolhe para metade da tela. Depois é só arrastar as bordas para o tamanho que quiser."
+        data-dica={
+          janelado
+            ? 'Volta a ocupar a tela inteira.'
+            : 'Encolhe para metade da tela. Depois é só arrastar as bordas para o tamanho que quiser.'
+        }
       >
-        <IconJanela />
-        Janela
+        {janelado ? <IconSquare /> : <IconJanela />}
+        {janelado ? 'Maximizar' : 'Janela'}
       </button>
 
       <button

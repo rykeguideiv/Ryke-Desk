@@ -312,6 +312,8 @@ export class Controlador {
     });
     sessao.on('saude', (viva) => this.patchConexao({ instavel: !viva }));
     sessao.on('stats', (stats) => this.patchConexao({ stats }));
+    // Ctrl+Alt+Del pode ser recusado pela política do Windows do outro lado.
+    sessao.on('sas', (r) => this.aviso(r.ok ? 'ok' : 'erro', r.motivo));
     sessao.on('meta', (meta) => this.patchConexao({ meta }));
     sessao.on('encerrada', (motivo) => {
       if (this.sessao !== sessao) return;

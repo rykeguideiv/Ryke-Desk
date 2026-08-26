@@ -75,6 +75,8 @@ export type SessionEvents = {
    */
   ponteiros: (lista: Ponteiro[]) => void;
   installer: (result: { ok: boolean; canceled?: boolean; message: string }) => void;
+  /** O que o outro lado respondeu ao pedido de Ctrl+Alt+Del. */
+  sas: (result: { ok: boolean; motivo: string }) => void;
   transfers: () => void;
   closed: (reason: string) => void;
   ready: () => void;
@@ -175,7 +177,7 @@ export class Session {
   remoteStream: MediaStream | null = null;
 
   private listeners: { [K in keyof SessionEvents]: SessionEvents[K][] } = {
-    stream: [], stats: [], meta: [], cursor: [], cor: [], ponteiros: [], installer: [], transfers: [],
+    stream: [], stats: [], meta: [], cursor: [], cor: [], ponteiros: [], installer: [], sas: [], transfers: [],
     closed: [], ready: [], saude: [],
   };
 
@@ -449,6 +451,7 @@ export class Session {
       if (msg.t === 'cursor') this.emit('cursor', { x: msg.x, y: msg.y });
       if (msg.t === 'cor') this.emit('cor', { indice: msg.indice, nome: msg.nome });
       if (msg.t === 'ponteiros') this.emit('ponteiros', msg.lista);
+      if (msg.t === 'sas-result') this.emit('sas', { ok: msg.ok, motivo: msg.motivo });
       if (msg.t === 'run-installer-result') {
         this.emit('installer', { ok: msg.ok, canceled: msg.canceled, message: msg.message });
       }
@@ -486,6 +489,13 @@ export class Session {
       case 'combo':
         window.ryke.input.combo(msg.codes);
         break;
+      case 'sas': {
+        // Não é injeção de tecla: vai para a API SendSAS, e a resposta volta —
+        // o pedido pode ser recusado pela política do Windows daqui.
+        const r = await window.ryke.input.sas();
+        this.sendCtrl({ t: 'sas-result', ok: r.ok, motivo: r.motivo });
+        break;
+      }
       case 'text':
         window.ryke.input.text(msg.value);
         break;
@@ -735,6 +745,10 @@ export class Session {
   }
   sendCombo(codes: string[]): void {
     this.sendCtrl({ t: 'combo', codes });
+  }
+  /** Ctrl+Alt+Del: pedido separado, porque a resposta importa. Ver sas.ts. */
+  sendSas(): void {
+    this.sendCtrl({ t: 'sas' });
   }
   sendText(value: string): void {
     this.sendCtrl({ t: 'text', value });
