@@ -1,12 +1,27 @@
-# Constrói o instalador do Windows e o manda ao SignPath Foundation para ser
-# assinado. Só o binário construído AQUI, no GitHub Actions, a partir deste
-# repositório público, é assinado — é isso que o SignPath verifica.
+# Constrói o instalador do Windows e o publica numa Release, passando antes
+# pelo SignPath Foundation para ser assinado quando as credenciais existem.
+#
+# Só o binário construído AQUI, no GitHub Actions, a partir deste repositório
+# público, é assinado — é isso que o SignPath verifica.
 #
 # COMO DISPARA
-#   Ao enviar uma tag v<versão> (ex.: git tag v1.0.17 && git push origin v1.0.17)
+#   Ao enviar uma tag v<versão> (ex.: git tag v1.0.19 && git push origin v1.0.19)
 #   ou manualmente pela aba Actions ("Run workflow").
 #
-# ANTES DE FUNCIONAR (uma vez só, depois que o SignPath aprovar o projeto)
+# POR QUE O INSTALADOR NÃO FICA NO REPOSITÓRIO
+#   Ele passa de 100 MB, que é o limite RÍGIDO do GitHub por arquivo — um
+#   `git push` com ele dentro é recusado. Nem o Git LFS resolveria bem: cada
+#   versão nova somaria outros 100 MB ao histórico, para sempre. Release é o
+#   lugar desenhado para isto — fica fora do histórico, aceita arquivos grandes
+#   e é o endereço que o README já dá a quem vai baixar.
+#
+# SOBRE O APK DO ANDROID
+#   O aplicativo de celular mora em outro projeto (`ryke-mobile/`), fora deste
+#   repositório, e é assinado com a chave de depuração do Android. Por isso ele
+#   não é compilado aqui: o APK é gerado localmente com `npm run apk` e anexado
+#   à Release à mão. Automatizá-lo exigiria trazer o projeto do celular para cá.
+#
+# ANTES DE A ASSINATURA FUNCIONAR (uma vez só, depois que o SignPath aprovar)
 #   1. Em Settings → Secrets and variables → Actions, crie o segredo
 #      SIGNPATH_API_TOKEN (o token da sua conta SignPath).
 #   2. Na mesma tela, aba Variables, crie SIGNPATH_ORGANIZATION_ID com o id da
@@ -14,9 +29,11 @@
 #   3. Ajuste project-slug e signing-policy-slug abaixo para os nomes que o
 #      SignPath criar para o seu projeto.
 #
-# Enquanto esses valores não existirem, o passo de build roda normalmente e
-# produz o instalador NÃO assinado como artefato — dá para testar todo o resto
-# sem depender do SignPath.
+# Enquanto esses valores não existirem, a Release sai assim mesmo, com o
+# instalador NÃO assinado e um aviso dizendo isso. Antes este workflow não
+# publicava Release nenhuma sem o SignPath, e a tag terminava em silêncio — o
+# instalador ficava só como artefato do Actions, que expira e que ninguém que
+# vem baixar o programa sabe onde procurar.
 
 name: Release (build + assinatura)
 
@@ -27,7 +44,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # necessário para criar a Release e anexar o .exe assinado
+  contents: write # necessário para criar a Release e anexar o instalador
 
 jobs:
   build:
@@ -63,8 +80,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # Só tenta assinar quando as credenciais do SignPath já existem. Sem elas,
-    # o job é pulado e o instalador não assinado continua disponível no job
-    # acima — nada quebra enquanto o projeto ainda não foi aprovado.
+    # o job é pulado e quem publica é o `publicar` abaixo.
     if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - name: Enviar ao SignPath e aguardar a assinatura
@@ -84,3 +100,29 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: assinado/*.exe
+
+  # Publica o instalador não assinado. Este job é a diferença entre uma tag que
+  # entrega um arquivo para o usuário baixar e uma tag que não produz nada
+  # visível — que era o que acontecia enquanto o SignPath não estivesse
+  # configurado.
+  publicar:
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/') && vars.SIGNPATH_ORGANIZATION_ID == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ryke-desk-instalador
+          path: entrega
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: entrega/*.exe
+          body: |
+            ## Instalar
+
+            **Windows:** baixe o `RykeDesk-Setup-*.exe` abaixo e execute. Atualizar é rodar o instalador de novo — ele fecha a versão aberta, remove a anterior e preserva número, senha e favoritos.
+
+            **Android:** o `RykeDesk-Mobile-*.apk` é anexado a esta Release à mão (o projeto do celular é compilado fora deste repositório). Baixe e abra no aparelho; será preciso permitir a instalação de fontes desconhecidas.
+
+            > ⚠️ **Este instalador ainda NÃO está assinado.** O Windows vai mostrar o aviso do SmartScreen — clique em *Mais informações* → *Executar assim mesmo*. A assinatura pelo [SignPath Foundation](https://signpath.org/) entra assim que o projeto for aprovado, e a partir dali o aviso desaparece.
