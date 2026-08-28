@@ -47,13 +47,36 @@ export const FILE_CHANNEL = 'ryke-files';
  */
 export const INPUT_CHANNEL = 'ryke-input';
 
-/** Blocos de 16 KB: tamanho seguro para SCTP em qualquer implementação. */
-export const FILE_CHUNK_SIZE = 16 * 1024;
-/** Limite pedido no projeto. */
-export const MAX_FILE_BYTES = 500 * 1024 * 1024;
+/**
+ * Blocos de 64 KB.
+ *
+ * Eram 16 KB — o tamanho seguro para qualquer implementação de SCTP. Só que as
+ * duas pontas de uma sessão Ryke Desk são sempre Chromium, que negocia até 256
+ * KB por mensagem, e 16 KB significava QUATRO VEZES mais idas e voltas: cada
+ * bloco custa uma leitura de disco por IPC, um `send` e um evento do outro
+ * lado. Numa transferência de dezenas de gigabytes, esse custo fixo deixa de
+ * ser detalhe e vira o gargalo — e o trabalho inútil de processar milhões de
+ * blocos foi parte do que derrubava a sessão.
+ */
+export const FILE_CHUNK_SIZE = 64 * 1024;
+
+/**
+ * NÃO existe limite de tamanho. Isto é decisão, não esquecimento.
+ *
+ * Havia um teto de 500 MB, e ele era arbitrário: nada na arquitetura precisa
+ * dele. Os bytes nunca passam inteiros pela memória — quem envia lê o arquivo
+ * em pedaços e quem recebe grava direto em disco, num fluxo. O que protege o
+ * disco de quem recebe não é um número escrito aqui, e sim duas conferências
+ * reais, feitas em `transfers.ts`: o espaço livre precisa comportar o que foi
+ * anunciado, e o remetente é cortado no instante em que passa de um byte do
+ * que prometeu.
+ *
+ * O teto só conseguia uma coisa: recusar uma transferência legítima de 50 GB.
+ */
+
 /** Acima disto paramos de enfileirar e esperamos o buffer drenar. */
-export const FILE_BUFFER_HIGH = 4 * 1024 * 1024;
-export const FILE_BUFFER_LOW = 1 * 1024 * 1024;
+export const FILE_BUFFER_HIGH = 8 * 1024 * 1024;
+export const FILE_BUFFER_LOW = 2 * 1024 * 1024;
 
 // ─────────────────────────── Sinalização ───────────────────────────
 
@@ -388,6 +411,19 @@ export type FileOffer = {
   id: string;
   name: string;
   size: number;
+  /**
+   * Caminho do arquivo DENTRO da pasta que está sendo enviada.
+   *
+   * Só existe quando a origem é uma pasta: `Fotos/2026/praia.jpg`. É o que
+   * permite ao outro lado recriar a árvore em vez de despejar quatrocentos
+   * arquivos soltos na pasta de downloads.
+   *
+   * Vem do outro computador, portanto é texto hostil até prova em contrário:
+   * quem o recebe quebra em segmentos, higieniza cada um e confere que o
+   * resultado continua dentro da pasta de destino. Sem isso, um `..\..\` aqui
+   * escreveria onde bem entendesse na máquina de quem recebe.
+   */
+  relPath?: string;
   /** true quando veio de um Ctrl+C de arquivo no explorador. */
   fromClipboard?: boolean;
   /** Grupo de uma seleção múltipla copiada no Explorer. */

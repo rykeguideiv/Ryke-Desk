@@ -867,6 +867,34 @@ async function principal() {
     const ESTACIONA = { x: 1, y: 1 };
     const perto = (p, x, y, folga = 4) => Math.abs(p.x - x) <= folga && Math.abs(p.y - y) <= folga;
 
+    /**
+     * Tem gente mexendo no mouse desta máquina agora?
+     *
+     * Esta seção mede onde o ponteiro do Windows está, e o Windows tem um
+     * ponteiro só — o mesmo que a pessoa sentada aqui usa. Se alguém encostar
+     * no mouse durante a medição, o teste acusa um defeito que não existe, e
+     * pior: acusa exatamente o comportamento que o programa tem DE PROPÓSITO,
+     * que é devolver o ponteiro a quem está com a mão nele.
+     *
+     * Então perguntamos antes: estaciona o cursor e observa se ele anda
+     * sozinho, sem nenhum evento sintético em jogo. Se andar, a medição não
+     * vale — e dizer isso é honesto, enquanto marcar falha seria mentira.
+     */
+    async function mouseHumanoAtivo() {
+      SetCursorPos(ESTACIONA.x, ESTACIONA.y);
+      await dorme(120);
+      for (let i = 0; i < 8; i++) {
+        await dorme(50);
+        if (!perto(posicaoDoCursor(), ESTACIONA.x, ESTACIONA.y, 2)) return true;
+      }
+      return false;
+    }
+
+    if (await mouseHumanoAtivo()) {
+      console.log('  --   ponteiro: pulado, o mouse desta máquina está sendo usado agora');
+      console.log('       (esta seção mede o cursor do Windows, que é o mesmo que a sua mão move)');
+    } else {
+
     async function aSetaNaoPuxaOCursor(fx, fy) {
       SetCursorPos(ESTACIONA.x, ESTACIONA.y);
       await dorme(320);
@@ -945,6 +973,8 @@ async function principal() {
     await oCliqueEmprestaEDevolve(0.25, 0.75);
 
     SetCursorPos(cursorOriginal.x, cursorOriginal.y);
+
+    }
 
     // ── 8. o teclado do visitante pressiona a tecla real no anfitrião ──
     //

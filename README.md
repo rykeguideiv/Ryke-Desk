@@ -20,7 +20,7 @@ o seu teclado e o seu mouse comandam, e os arquivos vão e vêm arrastando.
 | 🌐 | **Nenhum servidor para manter.** Nem meu, nem seu. Usa pontos de encontro públicos só para os dois PCs se acharem, e depois sai de cena |
 | 🔒 | **Ponta a ponta.** Quem repassa o recado inicial não sabe lê-lo; a tela e os arquivos nunca passam por lá |
 | ⌨️ | **O teclado inteiro vai**, incluindo Tecla Windows, Alt+Tab e Ctrl+Shift+Esc |
-| 📁 | **Arquivos até 500 MB** arrastando, e Ctrl+C aqui / Ctrl+V lá funcionando de verdade |
+| 📁 | **Arquivos e pastas, sem limite de tamanho** — arraste, e a árvore chega montada do outro lado |
 | 🎮 | **Modo Gamer:** mira 360° em jogos de tiro, que acesso remoto comum não faz |
 | 🆓 | **De graça, e aberto.** Sem plano, sem limite de sessão, sem "uso comercial detectado" |
 
@@ -348,6 +348,49 @@ encurta esse buffer e o mantém proporcional à trepidação medida da rede.
 
 A barra da sessão mostra os dois números: **ms** é a ida e volta até o outro
 computador; **ms img** é o atraso da imagem em si — o que a mão sente.
+
+## Arquivos e pastas
+
+Arraste para a janela da sessão, escolha pela gaveta de transferências, ou dê
+**Ctrl+C** num arquivo no Explorador e **Ctrl+V** do outro lado. Pastas inteiras
+também: vão com as subpastas e chegam montadas.
+
+**Não há limite de tamanho.** Havia um teto de 500 MB, e ele era arbitrário —
+nada na arquitetura precisava dele. Os bytes nunca passam inteiros pela
+memória: quem envia lê o arquivo em pedaços de 64 KB conforme o canal tem
+espaço, e quem recebe grava direto em disco, num fluxo.
+
+O que protege o disco de quem recebe não é um número escolhido no chute, e sim
+duas conferências reais:
+
+- **O espaço livre precisa comportar o que foi anunciado**, e isso é conferido
+  antes de o primeiro byte ser gravado. Um limite fixo tanto recusava uma
+  transferência legítima de 50 GB quanto deixava passar 500 MB num disco com
+  100 MB livres.
+- **O remetente é cortado no instante em que passa de um byte do que
+  prometeu**, e o arquivo parcial é apagado.
+
+E o caminho dentro da pasta vem do outro computador, portanto é tratado como
+texto hostil: cada segmento é higienizado e o resultado é conferido para
+garantir que continua dentro da pasta de downloads. Um `..\..\` ali escreveria
+onde bem entendesse na sua máquina.
+
+### Por que uma transferência enorme derrubava a sessão
+
+Cada bloco recebido redesenhava a interface inteira. Num arquivo de 50 GB isso
+são milhões de redesenhos: o laço de eventos parava de fazer qualquer outra
+coisa, o pulso da sessão deixava de ser respondido, a vigilância concluía —
+corretamente — que a sessão tinha morrido, e no meio disso o processo podia
+ficar sem memória e morrer de vez.
+
+Quando isso acontecia, o computador **sumia da malha**, porque toda a rede vive
+naquele processo. Era por isso que, depois da queda, ninguém mais respondia
+naquele número.
+
+Duas correções: o progresso passou a ser agrupado em quatro atualizações por
+segundo (o olho não aproveita mais do que isso numa barra de progresso), e a
+interface que morre agora **volta sozinha** — o número reaparece na malha em
+segundos, em vez de o programa ficar aberto e inútil.
 
 ## Segurança
 

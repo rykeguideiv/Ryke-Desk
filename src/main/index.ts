@@ -12,6 +12,7 @@ import { dirname, extname, join } from 'node:path';
 import { release } from 'node:os';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
 import { isElevated, permitirArrastarArquivos } from './elevation';
 
 import { Store } from './store';
@@ -505,6 +506,42 @@ function createWindow(): void {
   });
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  /**
+   * A interface morreu. Recarrega, em vez de deixar o programa virar fantasma.
+   *
+   * Toda a rede do Ryke Desk — a malha de encontro, a presença do número, as
+   * sessões — vive no renderer, porque é lá que existe a pilha WebRTC. Quando
+   * ele morre, o processo principal continua de pé com uma janela em branco e o
+   * computador simplesmente SOME da malha: quem tentar aquele número ouve
+   * "ninguém respondeu", e nada na tela explica o motivo.
+   *
+   * Foi exatamente o que aconteceu numa transferência muito grande. A causa
+   * daquela morte está corrigida (ver `notificarProgresso` em files.ts), mas a
+   * lição vale para qualquer outra: um renderer que morre precisa voltar
+   * sozinho. Recarregar devolve o número à malha em segundos, sem ninguém
+   * precisar descobrir que o programa está aberto e inútil.
+   *
+   * `reason` fica no log porque a diferença entre 'crashed', 'oom' e
+   * 'killed' é a diferença entre um defeito nosso, falta de memória e o
+   * antivírus — e adivinhar qual dos três foi é o pior jeito de investigar.
+   */
+  mainWindow.webContents.on('render-process-gone', (_evento, detalhe) => {
+    console.error(`[janela] a interface caiu (${detalhe.reason}, código ${detalhe.exitCode}) — recarregando`);
+    // Solta o que ficou preso: teclas, bloqueio de entrada, arquivos abertos.
+    // Sem isto, um Alt pressionado no instante da queda ficaria pressionado.
+    input.releaseAll();
+    if (input.isLocalInputBlocked()) input.blockLocalInput(false);
+    void transfers?.closeAll();
+    ponteiros.clear();
+    botoesSegurados.clear();
+    emprestimo = null;
+    fecharCamadaDeSetas();
+    visitantesConectados = 0;
+
+    if (detalhe.reason === 'clean-exit' || detalhe.reason === 'killed') return;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload();
   });
 
   // Links externos abrem no navegador, nunca dentro do app.
@@ -1204,6 +1241,37 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('files:open', (_e, path: string) => transfers.openForSend(path));
+
+  /**
+   * Escolher uma PASTA para enviar.
+   *
+   * Devolve a lista de arquivos já com o caminho relativo de cada um, e não a
+   * pasta em si: o protocolo transporta arquivos, e é o caminho relativo que
+   * permite ao outro lado remontar a árvore. Uma pasta com dez mil arquivos
+   * devolve dez mil linhas — a varredura acontece aqui, no processo que tem
+   * disco, e não na interface.
+   */
+  ipcMain.handle('files:pickFolder', async () => {
+    const escolha = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Escolha a pasta para enviar',
+      buttonLabel: 'Enviar pasta',
+      properties: ['openDirectory'],
+    });
+    if (escolha.canceled || !escolha.filePaths[0]) return null;
+    return transfers.listarPasta(escolha.filePaths[0]);
+  });
+
+  /** A mesma varredura, para uma pasta que veio arrastada para a janela. */
+  ipcMain.handle('files:listFolder', (_e, path: string) => transfers.listarPasta(path));
+
+  /** É pasta ou arquivo? O que foi arrastado precisa ser tratado diferente. */
+  ipcMain.handle('files:isFolder', async (_e, path: string) => {
+    try {
+      return (await stat(path)).isDirectory();
+    } catch {
+      return false;
+    }
+  });
   ipcMain.handle('files:read', async (_e, id: string, offset: number, length: number) => {
     const chunk = await transfers.readSlice(id, offset, length);
     // Buffer atravessa o IPC como Uint8Array; o renderer o entrega ao DataChannel.
@@ -1211,7 +1279,9 @@ function registerIpc(): void {
   });
   ipcMain.handle('files:closeSend', (_e, id: string) => transfers.closeSend(id));
 
-  ipcMain.handle('files:begin', (_e, id: string, name: string, size: number) => transfers.begin(id, name, size));
+  ipcMain.handle('files:begin', (_e, id: string, name: string, size: number, relPath?: string) =>
+    transfers.begin(id, name, size, relPath),
+  );
 
   /**
    * Põe o arquivo recém-recebido na área de transferência desta máquina.

@@ -5,7 +5,7 @@
  * fazer no PC está listado aqui — uma superfície pequena e explícita, em vez
  * de entregar `require` para uma página web.
  */
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { Favorito, Papel, ScryptParams, Settings } from '../shared/config';
 import type { PerfilCapturaSoftware } from '../shared/qualidade-captura';
 import type { Ponteiro } from '../shared/ponteiros';
@@ -198,11 +198,36 @@ const api = {
     newId: () => ipcRenderer.invoke('files:newId') as Promise<string>,
     pick: () => ipcRenderer.invoke('files:pick') as Promise<{ id: string; name: string; size: number } | null>,
     open: (path: string) => ipcRenderer.invoke('files:open', path) as Promise<{ id: string; name: string; size: number }>,
+    /** Abre o seletor de PASTA e devolve todos os arquivos dela, com o caminho relativo. */
+    pickFolder: () =>
+      ipcRenderer.invoke('files:pickFolder') as Promise<{ path: string; relPath: string; size: number }[] | null>,
+    /** A mesma lista, para uma pasta arrastada para a janela. */
+    listFolder: (path: string) =>
+      ipcRenderer.invoke('files:listFolder', path) as Promise<{ path: string; relPath: string; size: number }[]>,
+    isFolder: (path: string) => ipcRenderer.invoke('files:isFolder', path) as Promise<boolean>,
+    /**
+     * O caminho em disco de um arquivo arrastado para a janela.
+     *
+     * `File.path` foi removido do Electron por segurança — a página não deve
+     * descobrir sozinha onde as coisas moram. `webUtils.getPathForFile` é o
+     * substituto oficial, e vive na ponte justamente para a decisão continuar
+     * sendo nossa, e não da página.
+     *
+     * Devolve null para o que não veio do disco (uma colagem, um arquivo
+     * gerado na hora): aí os bytes já estão na memória e não há caminho.
+     */
+    caminhoDe: (file: File): string | null => {
+      try {
+        return webUtils.getPathForFile(file) || null;
+      } catch {
+        return null;
+      }
+    },
     read: (id: string, offset: number, length: number) =>
       ipcRenderer.invoke('files:read', id, offset, length) as Promise<Uint8Array<ArrayBuffer>>,
     closeSend: (id: string) => ipcRenderer.invoke('files:closeSend', id) as Promise<void>,
-    begin: (id: string, name: string, size: number) =>
-      ipcRenderer.invoke('files:begin', id, name, size) as Promise<{ path: string }>,
+    begin: (id: string, name: string, size: number, relPath?: string) =>
+      ipcRenderer.invoke('files:begin', id, name, size, relPath) as Promise<{ path: string }>,
     write: (id: string, chunk: Uint8Array) => ipcRenderer.invoke('files:write', id, chunk) as Promise<number>,
     finish: (id: string) => ipcRenderer.invoke('files:finish', id) as Promise<{ path: string; size: number }>,
     abort: (id: string, reason: string) => ipcRenderer.invoke('files:abort', id, reason) as Promise<void>,

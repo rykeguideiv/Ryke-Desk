@@ -1,6 +1,6 @@
 {
   "name": "ryke-desk-mobile",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "private": true,
   "description": "Ryke Desk Mobile — acessa um PC a partir do Android",
   "type": "module",

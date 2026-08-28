@@ -2,8 +2,6 @@ import {
   FILE_CHUNK_SIZE,
   FILE_BUFFER_HIGH,
   FILE_BUFFER_LOW,
-  MAX_FILE_BYTES,
-  formatBytes,
   type FileControl,
 } from '../../../shared/protocol';
 
@@ -15,8 +13,13 @@ import {
  * cabeçalho em cada bloco de 16 KB. O resto fica na fila.
  *
  * O controle de fluxo é a parte que não pode falhar: sem observar o
- * `bufferedAmount`, empurrar 500 MB de uma vez estoura a memória do
+ * `bufferedAmount`, empurrar um arquivo grande de uma vez estoura a memória do
  * Chromium e derruba a sessão inteira, tela junto.
+ *
+ * NÃO HÁ LIMITE DE TAMANHO. O que existia (500 MB) era arbitrário — os bytes
+ * nunca passam inteiros pela memória, então nada na arquitetura precisava
+ * dele. Quem protege o disco de quem recebe é `transfers.ts`, conferindo
+ * espaço livre de verdade e cortando o remetente que passar do que anunciou.
  */
 
 export type Direction = 'enviando' | 'recebendo';
@@ -40,6 +43,14 @@ export type TransferView = {
 export interface ChunkSource {
   name: string;
   size: number;
+  /**
+   * Caminho deste arquivo DENTRO da pasta que está sendo enviada.
+   *
+   * `Fotos/2026/praia.jpg`. Só existe quando a origem é uma pasta; é o que faz
+   * a árvore chegar montada do outro lado em vez de virar um monte de arquivos
+   * soltos na pasta de downloads.
+   */
+  relPath?: string;
   /** Sempre respaldado por um ArrayBuffer comum — é o que o DataChannel aceita. */
   read(offset: number, length: number): Promise<Uint8Array<ArrayBuffer>>;
   close(): Promise<void>;
@@ -59,10 +70,11 @@ export function sourceFromFile(file: File): ChunkSource {
 }
 
 /** Arquivo escolhido no diálogo ou copiado no Explorador: mora em disco. */
-export function sourceFromDisk(handle: { id: string; name: string; size: number }): ChunkSource {
+export function sourceFromDisk(handle: { id: string; name: string; size: number; relPath?: string }): ChunkSource {
   return {
     name: handle.name,
     size: handle.size,
+    relPath: handle.relPath,
     read: (offset, length) => window.ryke.files.read(handle.id, offset, length),
     close: () => window.ryke.files.closeSend(handle.id),
   };
@@ -75,6 +87,41 @@ type Incoming = { view: TransferView; clipboard: ClipboardBatch | null; legadoCl
 export class FileEngine {
   private channel: RTCDataChannel;
   private notify: () => void;
+
+  /**
+   * AQUI MORAVA O DEFEITO QUE DERRUBAVA A SESSÃO.
+   *
+   * Cada bloco recebido ou enviado chamava `notify()`, e `notify` redesenha a
+   * árvore React inteira. Num arquivo de 50 GB isso são MILHÕES de renders —
+   * o laço de eventos do renderer não faz mais nada, o pulso da sessão para de
+   * ser respondido, a vigilância conclui (corretamente!) que a sessão morreu,
+   * e no meio disso o processo pode simplesmente ficar sem memória e morrer.
+   * Quando o renderer morre, o computador some da malha: era por isso que,
+   * depois da queda, ninguém mais respondia naquele número.
+   *
+   * O progresso agora é agrupado. Quatro atualizações por segundo é mais do
+   * que o olho aproveita numa barra de progresso, e é a diferença entre
+   * redesenhar 4 vezes por segundo e 300 mil.
+   */
+  private progressoAgendado = false;
+  private static readonly PROGRESSO_MS = 250;
+
+  /**
+   * Progresso: pode esperar, pode ser agrupado, pode ser descartado.
+   *
+   * Usado só para "andou mais um bloco". Mudança de ESTADO — começou,
+   * terminou, falhou — continua avisando na hora, por `notify()` direto: essas
+   * são poucas, e atrasá-las deixaria a tela mentindo sobre o que está
+   * acontecendo.
+   */
+  private notificarProgresso(): void {
+    if (this.progressoAgendado) return;
+    this.progressoAgendado = true;
+    window.setTimeout(() => {
+      this.progressoAgendado = false;
+      if (!this.closed) this.notify();
+    }, FileEngine.PROGRESSO_MS);
+  }
 
   private queue: Outgoing[] = [];
   private active: Outgoing | null = null;
@@ -148,25 +195,16 @@ export class FileEngine {
 
   // ─────────────────────────── envio ────────────────────────────
 
+  /**
+   * Põe um arquivo na fila de envio. Sem teto de tamanho — ver o topo deste
+   * arquivo e `transfers.ts` para o que protege o disco de quem recebe.
+   */
   async enqueue(source: ChunkSource, clipboard: ClipboardBatch | null = null): Promise<boolean> {
-    if (source.size > MAX_FILE_BYTES) {
-      this.push({
-        id: crypto.randomUUID(),
-        name: source.name,
-        size: source.size,
-        direction: 'enviando',
-        transferred: 0,
-        state: 'erro',
-        message: `Acima do limite de ${formatBytes(MAX_FILE_BYTES)}`,
-        rate: 0,
-      });
-      await source.close();
-      return false;
-    }
-
     const view: TransferView = {
       id: crypto.randomUUID(),
-      name: source.name,
+      // Numa pasta, o caminho relativo é o nome útil: cinco arquivos chamados
+      // "capa.jpg" em cinco subpastas seriam cinco linhas idênticas na tela.
+      name: source.relPath ?? source.name,
       size: source.size,
       direction: 'enviando',
       transferred: 0,
@@ -194,6 +232,7 @@ export class FileEngine {
       id: next.view.id,
       name: next.source.name,
       size: next.source.size,
+      relPath: next.source.relPath,
       fromClipboard: next.clipboard !== null,
       clipboardBatch: next.clipboard?.id,
       clipboardIndex: next.clipboard?.index,
@@ -229,7 +268,7 @@ export class FileEngine {
         view.transferred = offset;
         const elapsed = (performance.now() - startedAt) / 1000;
         view.rate = elapsed > 0.2 ? offset / elapsed : 0;
-        this.notify();
+        this.notificarProgresso();
       }
 
       this.sendControl({ t: 'file-done', id: view.id });
@@ -337,14 +376,11 @@ export class FileEngine {
       this.sendControl({ t: 'file-reject', id: msg.id, reason: 'já há uma transferência em andamento' });
       return;
     }
-    if (msg.size > MAX_FILE_BYTES) {
-      this.sendControl({ t: 'file-reject', id: msg.id, reason: `acima do limite de ${formatBytes(MAX_FILE_BYTES)}` });
-      return;
-    }
-
+    // Sem teto de tamanho: quem recusa, e por um motivo concreto, é o disco —
+    // `files.begin` confere o espaço livre logo abaixo e explica o que falta.
     const view: TransferView = {
       id: msg.id,
-      name: msg.name,
+      name: msg.relPath ?? msg.name,
       size: msg.size,
       direction: 'recebendo',
       transferred: 0,
@@ -353,7 +389,7 @@ export class FileEngine {
     };
 
     try {
-      await window.ryke.files.begin(msg.id, msg.name, msg.size);
+      await window.ryke.files.begin(msg.id, msg.name, msg.size, msg.relPath);
     } catch (err) {
       view.state = 'erro';
       view.message = err instanceof Error ? err.message : String(err);
@@ -394,7 +430,7 @@ export class FileEngine {
       entry.view.transferred = written;
       const elapsed = (performance.now() - this.receiveStart) / 1000;
       entry.view.rate = elapsed > 0.2 ? written / elapsed : 0;
-      this.notify();
+      this.notificarProgresso();
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       entry.view.state = 'erro';

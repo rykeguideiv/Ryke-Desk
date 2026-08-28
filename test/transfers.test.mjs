@@ -7,7 +7,7 @@
 import { Transfers, sanitizeFileName } from '../src/main/transfers.ts';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, basename } from 'node:path';
+import { join, dirname, basename, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 let failures = 0;
@@ -77,13 +77,34 @@ check('segundo arquivo de mesmo nome ganha sufixo',
   basename(segundo.path) === 'Relatório final (2).pdf' && readFileSync(final.path).equals(conteudo));
 
 // ── travas ──
-let recusou = false;
+//
+// NÃO existe mais teto de tamanho, e isso é o comportamento correto: o teto de
+// 500 MB era arbitrário e recusava transferências legítimas de dezenas de
+// gigabytes. Os bytes nunca passam inteiros pela memória — quem envia lê em
+// pedaços, quem recebe grava em fluxo.
+let aceitouGrande = false;
 try {
-  await receptor.begin('t3', 'gigante.bin', 600 * 1024 * 1024);
+  await receptor.begin('t3', 'gigante.bin', 8 * 1024 * 1024 * 1024);
+  aceitouGrande = true;
+  await receptor.abort('t3', 'só queríamos saber se abria');
 } catch (err) {
-  recusou = /500 MB/.test(err.message);
+  // Só é aceitável recusar por FALTA DE ESPAÇO — que é a trava que substituiu
+  // o teto, e que depende do disco de quem roda o teste.
+  aceitouGrande = /espaço em disco/.test(err.message);
 }
-check('recusa arquivo acima de 500 MB', recusou);
+check('aceita arquivo de 8 GB — o teto de 500 MB não existe mais', aceitouGrande);
+
+// O que protege o disco agora é o espaço real, e não um número escolhido no
+// chute. Anunciar mais do que cabe no disco tem de ser recusado na abertura,
+// antes de qualquer byte ser gravado.
+let semEspaco = false;
+try {
+  // Um petabyte não cabe em disco nenhum que rode este teste.
+  await receptor.begin('t3b', 'impossivel.bin', 1024 ** 5);
+} catch (err) {
+  semEspaco = /espaço em disco/.test(err.message);
+}
+check('recusa o que não cabe no disco, antes de gravar um byte', semEspaco);
 
 // Remetente mentiroso: anuncia 10 bytes e tenta despejar 5000.
 await receptor.begin('t4', 'mentiroso.bin', 10);
@@ -136,6 +157,33 @@ check('recusa enviar uma pasta', rejeitouPasta);
 await receptor.closeAll();
 await remetente.closeAll();
 rmSync(raiz, { recursive: true, force: true });
+
+// ── pastas: a árvore chega montada ──
+//
+// O caminho relativo vem do OUTRO computador, então é texto hostil. Estes três
+// casos são os que separam "recria a pasta" de "escreve onde quiser".
+await receptor.begin('p1', 'praia.jpg', 4, 'Fotos/2026/praia.jpg');
+await receptor.write('p1', Buffer.alloc(4, 1));
+const naArvore = await receptor.finish('p1');
+check('recria a subpasta do arquivo recebido',
+  naArvore.path.includes(join('Fotos', '2026')) && basename(naArvore.path) === 'praia.jpg',
+  naArvore.path);
+
+// Travessia: `..` não pode levar a gravação para fora da pasta de downloads.
+await receptor.begin('p2', 'fuga.txt', 3, '../../fuga.txt');
+await receptor.write('p2', Buffer.alloc(3, 2));
+const contida = await receptor.finish('p2');
+check('caminho com .. não escapa da pasta de downloads',
+  resolve(contida.path).startsWith(resolve(destino)),
+  contida.path);
+
+// Caminho absoluto do Windows: idem.
+await receptor.begin('p3', 'sistema.dll', 3, 'C:\\Windows\\System32\\sistema.dll');
+await receptor.write('p3', Buffer.alloc(3, 3));
+const contida2 = await receptor.finish('p3');
+check('caminho absoluto não escapa da pasta de downloads',
+  resolve(contida2.path).startsWith(resolve(destino)),
+  contida2.path);
 
 console.log(failures === 0 ? '\nTransferência de arquivos validada.\n' : `\n${failures} falha(s).\n`);
 process.exit(failures === 0 ? 0 : 1);

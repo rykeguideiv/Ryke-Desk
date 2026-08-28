@@ -1,4 +1,4 @@
-import { formatId, normalizeId, type ModoAcesso, type SignalPayload } from '../../../shared/protocol';
+import { formatBytes, formatId, normalizeId, type ModoAcesso, type SignalPayload } from '../../../shared/protocol';
 import { Signaling } from './signaling';
 import { Session, type LiveStats, type Quality } from './session';
 import { sourceFromDisk, sourceFromFile, type TransferView } from './files';
@@ -1334,13 +1334,35 @@ export class Controller {
   }
 
   /** Arquivos arrastados para dentro da janela. */
-  sendDroppedFiles(files: FileList | File[]): void {
+  /**
+   * Arrastado para a janela: pode ser arquivo ou PASTA.
+   *
+   * A distinção não é visível no `FileList` — uma pasta arrastada aparece como
+   * um `File` de tamanho zero, e tentar lê-lo devolve erro. Era isso que fazia
+   * arrastar uma pasta terminar num arquivo vazio com o nome dela. Perguntamos
+   * ao disco o que cada coisa é, e a pasta vira a árvore inteira.
+   */
+  async sendDroppedFiles(files: FileList | File[]): Promise<void> {
     const session = this.active;
     if (!session) {
       this.toast('erro', 'Conecte-se a um computador antes de enviar arquivos.');
       return;
     }
-    for (const file of Array.from(files)) session.sendFile(sourceFromFile(file));
+
+    for (const file of Array.from(files)) {
+      const caminho = window.ryke.files.caminhoDe(file);
+      if (caminho && (await window.ryke.files.isFolder(caminho))) {
+        await this.enviarArvore(await window.ryke.files.listFolder(caminho));
+        continue;
+      }
+      // Sem caminho em disco (colagem, arquivo gerado), os bytes já estão aqui.
+      if (caminho) {
+        const handle = await window.ryke.files.open(caminho);
+        session.sendFile(sourceFromDisk(handle));
+      } else {
+        session.sendFile(sourceFromFile(file));
+      }
+    }
   }
 
   async sendFileFromDialog(): Promise<void> {
@@ -1348,6 +1370,51 @@ export class Controller {
     if (!session) return;
     const handle = await window.ryke.files.pick();
     if (handle) session.sendFile(sourceFromDisk(handle));
+  }
+
+  /**
+   * Envia uma PASTA inteira, com a árvore de subpastas.
+   *
+   * O protocolo transporta arquivos, um de cada vez — então "enviar uma pasta"
+   * é enfileirar todos os arquivos dela, cada um carregando o próprio caminho
+   * relativo. Quem recebe recria a árvore a partir desses caminhos.
+   *
+   * A fila do motor já serializa: os arquivos saem um após o outro, e o
+   * controle de fluxo do canal continua valendo para cada um. Enfileirar dez
+   * mil não consome dez mil vezes mais memória — o que fica na memória é dez
+   * mil descritores de poucas dezenas de bytes, não dez mil arquivos.
+   */
+  async sendFolderFromDialog(): Promise<void> {
+    const session = this.active;
+    if (!session) return;
+    const arquivos = await window.ryke.files.pickFolder();
+    if (!arquivos) return;
+    await this.enviarArvore(arquivos);
+  }
+
+  /** O trecho comum entre escolher uma pasta e arrastá-la para a janela. */
+  private async enviarArvore(arquivos: { path: string; relPath: string; size: number }[]): Promise<void> {
+    const session = this.active;
+    if (!session) return;
+    if (arquivos.length === 0) {
+      this.toast('info', 'A pasta está vazia — não há nada para enviar.');
+      return;
+    }
+
+    const total = arquivos.reduce((soma, a) => soma + a.size, 0);
+    this.toast('info', `Enviando ${arquivos.length} ${arquivos.length === 1 ? 'arquivo' : 'arquivos'} (${formatBytes(total)}).`);
+
+    for (const arquivo of arquivos) {
+      // `openForSend` abre um descritor de arquivo por vez. Abrir dez mil de
+      // uma vez esbarraria no limite do sistema operacional; abrimos na hora
+      // de cada envio, e o motor fecha ao terminar.
+      try {
+        const handle = await window.ryke.files.open(arquivo.path);
+        session.sendFile(sourceFromDisk({ ...handle, relPath: arquivo.relPath }));
+      } catch (err) {
+        this.toast('erro', `Não foi possível abrir ${arquivo.relPath}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   }
 
   /** Envia o arquivo que o usuário copiou no Explorador deste PC. */

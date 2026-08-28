@@ -835,10 +835,13 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault();
     setDragging(false);
-    if (e.dataTransfer.files.length > 0) {
-      controller.sendDroppedFiles(e.dataTransfer.files);
-      setShowDrawer(true);
-    }
+    if (e.dataTransfer.files.length === 0) return;
+    // Precisa ser lido AGORA: o `dataTransfer` é esvaziado assim que o
+    // manipulador retorna, e `sendDroppedFiles` é assíncrono (pergunta ao
+    // disco o que é pasta e o que é arquivo).
+    const arquivos = Array.from(e.dataTransfer.files);
+    void controller.sendDroppedFiles(arquivos);
+    setShowDrawer(true);
   };
 
   const emAndamento = state.transfers.filter((t) => t.state === 'ativo' || t.state === 'aguardando').length;
@@ -1507,7 +1510,7 @@ function TransferDrawer({
 
       <div className="drawer-foot">
         <div className="dropzone">
-          Arraste arquivos para esta janela
+          Arraste arquivos <strong>ou pastas</strong> para esta janela
           <br />
           ou copie um arquivo no Explorador e clique no aviso que aparece
         </div>
@@ -1515,7 +1518,13 @@ function TransferDrawer({
           <IconSend />
           Escolher arquivo para enviar
         </button>
-        <span className="hint">Limite de 500 MB por arquivo.</span>
+        <button className="btn block" onClick={() => void controller.sendFolderFromDialog()}>
+          <IconFolder />
+          Escolher pasta para enviar
+        </button>
+        <span className="hint">
+          Sem limite de tamanho. Uma pasta vai inteira, com as subpastas, e chega montada do outro lado.
+        </span>
       </div>
     </aside>
   );

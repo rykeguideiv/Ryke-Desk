@@ -8,11 +8,11 @@
  * porque nada que vem da rede pode escolher onde gravar.
  */
 import { createWriteStream, WriteStream } from 'node:fs';
-import { open, mkdir, unlink, stat } from 'node:fs/promises';
+import { open, mkdir, unlink, stat, statfs, readdir } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { MAX_FILE_BYTES } from '../shared/protocol';
+
 
 // Caracteres proibidos em nome de arquivo no Windows, mais os de controle.
 // Espaço fica de fora: "Relatório final.pdf" deve continuar com o espaço.
@@ -85,14 +85,23 @@ export class Transfers {
 
   // ── recebimento ──
 
-  /** Abre o arquivo de destino. Lança se o tamanho anunciado for inválido. */
-  async begin(id: string, rawName: string, size: number): Promise<{ path: string }> {
+  /**
+   * Abre o arquivo de destino.
+   *
+   * @param relPath caminho dentro da pasta de origem, quando é uma pasta que
+   *   está sendo enviada. Recria a árvore no destino.
+   */
+  async begin(id: string, rawName: string, size: number, relPath?: string): Promise<{ path: string }> {
     if (!Number.isFinite(size) || size < 0) throw new Error('tamanho inválido');
-    if (size > MAX_FILE_BYTES) throw new Error('acima do limite de 500 MB');
     if (this.incoming.has(id)) throw new Error('transferência duplicada');
 
+    // O tamanho não tem teto, mas o disco tem. Conferir aqui é o que substitui
+    // o antigo limite de 500 MB — e é uma conferência de verdade, contra o
+    // espaço que existe, em vez de um número escolhido no chute.
+    await this.conferirEspaco(size);
+
     await mkdir(this.downloadDir, { recursive: true });
-    const path = await uniquePath(this.downloadDir, sanitizeFileName(rawName));
+    const path = relPath ? await this.caminhoNaArvore(relPath) : await uniquePath(this.downloadDir, sanitizeFileName(rawName));
 
     const stream = createWriteStream(path, { flags: 'wx' });
     await new Promise<void>((res, rej) => {
@@ -150,13 +159,73 @@ export class Transfers {
     await unlink(entry.path).catch(() => {});
   }
 
+  /**
+   * Cabe no disco?
+   *
+   * Sem teto de tamanho, esta é a única defesa real contra encher o disco de
+   * quem recebe — e é melhor do que o teto era, porque um limite fixo tanto
+   * recusava uma transferência legítima de 50 GB quanto deixava passar 500 MB
+   * num disco com 100 MB livres.
+   *
+   * A folga de 64 MB evita entregar o sistema operacional a um disco
+   * exatamente zerado, que é onde o Windows começa a falhar de formas
+   * criativas.
+   */
+  private async conferirEspaco(size: number): Promise<void> {
+    try {
+      await mkdir(this.downloadDir, { recursive: true });
+      const fs = await statfs(this.downloadDir);
+      const livre = fs.bavail * fs.bsize;
+      const FOLGA = 64 * 1024 * 1024;
+      if (size + FOLGA > livre) {
+        throw new Error(
+          `não há espaço em disco: o arquivo tem ${(size / 1024 ** 3).toFixed(1)} GB e restam ${(livre / 1024 ** 3).toFixed(1)} GB`,
+        );
+      }
+    } catch (err) {
+      // `statfs` não existe em todo sistema de arquivos. Falhar a conferência
+      // não pode impedir a transferência — na pior hipótese o disco enche e o
+      // erro aparece na hora da gravação, que é o comportamento anterior.
+      if (err instanceof Error && err.message.startsWith('não há espaço')) throw err;
+    }
+  }
+
+  /**
+   * Recria a árvore da pasta de origem dentro da pasta de downloads.
+   *
+   * Cada segmento é higienizado, e no fim conferimos que o caminho resolvido
+   * continua DENTRO do destino. Os dois passos são necessários: o primeiro
+   * tira `..` e caracteres proibidos, o segundo é a rede de segurança para
+   * qualquer coisa que o primeiro não tenha previsto — link simbólico, nome
+   * reservado do Windows, codificação estranha. Um caminho vindo do outro
+   * computador não merece confiança nenhuma.
+   */
+  private async caminhoNaArvore(relPath: string): Promise<string> {
+    const segmentos = relPath
+      .split(/[\\/]+/)
+      .map((s) => sanitizeFileName(s))
+      .filter((s) => s.length > 0 && s !== '.' && s !== '..');
+
+    if (segmentos.length === 0) throw new Error('caminho inválido');
+
+    const arquivo = segmentos.pop()!;
+    const pasta = join(this.downloadDir, ...segmentos);
+
+    const raiz = resolve(this.downloadDir);
+    if (resolve(pasta) !== raiz && !resolve(pasta).startsWith(raiz + sep)) {
+      throw new Error('caminho fora da pasta de downloads');
+    }
+
+    await mkdir(pasta, { recursive: true });
+    return uniquePath(pasta, arquivo);
+  }
+
   // ── envio ──
 
   async openForSend(path: string): Promise<{ id: string; name: string; size: number }> {
     const full = resolve(path);
     const info = await stat(full);
     if (!info.isFile()) throw new Error('só é possível enviar arquivos, não pastas');
-    if (info.size > MAX_FILE_BYTES) throw new Error('acima do limite de 500 MB');
 
     const handle = await open(full, 'r');
     const id = randomUUID();
@@ -172,6 +241,48 @@ export class Transfers {
     if (buffer.length === 0) return buffer;
     const { bytesRead } = await entry.handle.read(buffer, 0, buffer.length, offset);
     return bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead);
+  }
+
+  /**
+   * Todos os arquivos de uma pasta, com o caminho relativo de cada um.
+   *
+   * O caminho relativo começa NO NOME DA PASTA — `Fotos/2026/praia.jpg`, e não
+   * `2026/praia.jpg`. É o que faz a pasta chegar inteira do outro lado, com o
+   * nome dela, em vez de o conteúdo se espalhar pela pasta de downloads.
+   *
+   * Links simbólicos são ignorados de propósito: seguir um deles poderia
+   * levar a varredura para fora da pasta escolhida — no limite, para o disco
+   * inteiro — sem que ninguém tivesse pedido isso. Pastas vazias também não
+   * entram, porque o protocolo transporta arquivos, e uma pasta sem arquivo
+   * nenhum não tem o que transportar.
+   */
+  async listarPasta(raiz: string): Promise<{ path: string; relPath: string; size: number }[]> {
+    const base = resolve(raiz);
+    const info = await stat(base);
+    if (!info.isDirectory()) throw new Error('não é uma pasta');
+
+    const encontrados: { path: string; relPath: string; size: number }[] = [];
+    const nomeDaRaiz = basename(base);
+
+    const andar = async (pasta: string, prefixo: string): Promise<void> => {
+      const itens = await readdir(pasta, { withFileTypes: true });
+      for (const item of itens) {
+        // `isSymbolicLink` antes de qualquer outra coisa: um link para "C:\"
+        // dentro da pasta transformaria isto numa varredura do disco inteiro.
+        if (item.isSymbolicLink()) continue;
+        const caminho = join(pasta, item.name);
+        const rel = `${prefixo}/${item.name}`;
+        if (item.isDirectory()) {
+          await andar(caminho, rel);
+        } else if (item.isFile()) {
+          const st = await stat(caminho).catch(() => null);
+          if (st) encontrados.push({ path: caminho, relPath: rel, size: st.size });
+        }
+      }
+    };
+
+    await andar(base, nomeDaRaiz);
+    return encontrados;
   }
 
   async closeSend(id: string): Promise<void> {
