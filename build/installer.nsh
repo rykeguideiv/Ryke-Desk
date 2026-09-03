@@ -40,12 +40,21 @@
 ; instalacoes antigas.
 !macro customCheckAppRunning
   DetailPrint "Encerrando o Ryke Desk para substituir os arquivos..."
+  ; APAGAR AS TAREFAS PRIMEIRO — senao o app ressuscita e trava o exe.
+  ; Uma versao antiga (1.0.33) rodava como administrador e era reaberta pela
+  ; tarefa de logon /RL HIGHEST; enquanto ela existir, o taskkill abaixo mata o
+  ; processo mas a tarefa o traz de volta, deixando o arquivo em uso e a
+  ; atualizacao "conclui" sem trocar nada. Removendo as tarefas antes, o
+  ; encerramento e definitivo e a copia dos arquivos novos sempre pega. O
+  ; customInstall recria as tarefas (agora sem elevacao) no fim.
+  nsExec::ExecToLog 'schtasks /Delete /TN "Ryke Desk" /F'
+  nsExec::ExecToLog 'schtasks /Delete /TN "RykeDesk-Admin" /F'
   ; Primeiro o pedido educado, para o aplicativo salvar o que precisa e
   ; soltar o gancho de teclado; depois a forca, so se ainda estiver vivo.
   nsExec::ExecToLog 'taskkill /IM "Ryke Desk.exe" /T'
   Sleep 1200
   nsExec::ExecToLog 'taskkill /F /IM "Ryke Desk.exe" /T'
-  Sleep 400
+  Sleep 800
 
   ; Remove a instalacao NSIS por usuario criada pelas versoes 1.0.5/1.0.6.
   ; A configuracao e o numero Ryke ficam em AppData\Roaming e sao preservados.
@@ -91,8 +100,70 @@
 ; `runAfterFinish` fica desligado no package.json de proposito, para a tela
 ; final nao oferecer a caixa "Executar o Ryke Desk" — ele ja esta rodando.
 !macro customInstall
+  ; ───────────────────────────────────────────────────────────────────
+  ; ABRIR JUNTO COM O WINDOWS — E **SEM** ELEVAÇÃO (é o que conserta a lentidão)
+  ;
+  ; DESCOBERTA que mudou a arquitetura: o Chromium, quando o processo roda como
+  ; ADMINISTRADOR, não consegue INICIAR a captura de tela (getDisplayMedia devolve
+  ; "NotReadableError: Could not start video source"), e o app caía numa rota
+  ; reserva a ~1 quadro por segundo. Nenhum switch de GPU/sandbox nem o método WGC
+  ; resolveu — captura e admin são incompatíveis no Electron. Rodar SEM elevação
+  ; faz a captura voltar a 60 fps por hardware. Por isso o app agora é `asInvoker`.
+  ;
+  ; Então a tarefa de logon NÃO usa mais `/RL HIGHEST`: ela sobe o app no nível
+  ; normal do usuário (é aí que a captura funciona). O `--minimizado` mantém a
+  ; janela escondida no ícone perto do relógio, como pedido.
+  DetailPrint "Configurando o Ryke Desk para abrir junto com o Windows..."
+  nsExec::ExecToLog 'schtasks /Create /TN "Ryke Desk" /TR "\"$INSTDIR\${APP_EXECUTABLE_FILENAME}\" --minimizado" /SC ONLOGON /F'
+
+  ; ───────────────────────────────────────────────────────────────────
+  ; TAREFA DO "MODO ADMINISTRADOR" — elevação sob demanda, SEM UAC.
+  ;
+  ; O app roda sem elevação (é o que faz a captura funcionar). Mas o botão
+  ; "Modo administrador" precisa poder subir o app ELEVADO quando o usuário for
+  ; instalar algo no PC remoto — e sem a janela de UAC, que numa sessão remota
+  ; apareceria na área de trabalho segura, invisível para quem controla.
+  ; Esta tarefa RL HIGHEST, criada aqui pelo instalador (que é elevado), é o que
+  ; o botão dispara: o próprio dono pode rodar a própria tarefa de nível mais
+  ; alto sem novo prompt. Gatilho ONCE no passado — só roda quando chamada.
+  nsExec::ExecToLog 'schtasks /Create /TN "RykeDesk-Admin" /TR "\"$INSTDIR\${APP_EXECUTABLE_FILENAME}\" --minimizado" /SC ONCE /ST 00:00 /RL HIGHEST /F'
+
+  ; ───────────────────────────────────────────────────────────────────
+  ; LIBERAR NO FIREWALL — o que abre o caminho DIRETO entre os dois PCs.
+  ;
+  ; Num Windows recém-instalado o firewall bloqueia toda conexão de ENTRADA
+  ; por padrão. Numa ferramenta de acesso remoto isso é fatal para o
+  ; desempenho: sem poder receber a conexão direta, o WebRTC é empurrado para
+  ; um caminho indireto (retransmitido por um servidor no meio), que adiciona
+  ; atraso CONSTANTE — o mesmo atraso que não melhora ao baixar a qualidade, e
+  ; a causa nº 1 de "está lento igual ao AnyDesk não estava". Liberar o
+  ; programa (todas as portas, que no WebRTC são dinâmicas) deixa o par direto
+  ; fechar. Apagamos antes para não empilhar regras a cada reinstalação.
+  DetailPrint "Liberando o Ryke Desk no firewall do Windows..."
+  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Ryke Desk"'
+  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Ryke Desk" dir=in action=allow program="$INSTDIR\${APP_EXECUTABLE_FILENAME}" enable=yes profile=any'
+
+  ; Abre o aplicativo assim que a cópia termina, ANTES da tela de "Concluir" —
+  ; e SEM elevação, senão a captura de tela volta a falhar (ver acima).
+  ;
+  ; O instalador roda elevado, então um `Exec` direto herdaria o token de
+  ; administrador e o app subiria elevado — justo o que não queremos. Lançar
+  ; PELO `explorer.exe` resolve: o Explorador roda no nível normal do usuário, e
+  ; todo processo que ele inicia nasce no mesmo nível. É o jeito padrão de
+  ; "des-elevar" um lançamento a partir de um instalador elevado, e continua
+  ; silencioso numa atualização remota (o Explorador já está de pé na sessão).
   ${IfNot} ${Silent}
-    DetailPrint "Reabrindo o Ryke Desk como administrador..."
-    Exec '"$INSTDIR\${APP_EXECUTABLE_FILENAME}"'
+    DetailPrint "Abrindo o Ryke Desk..."
+    Exec '"$WINDIR\explorer.exe" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"'
   ${EndIf}
+!macroend
+
+; Remove as tarefas agendadas ao desinstalar — a de inicialização e a que
+; dispara o Ctrl+Alt+Del como SISTEMA. Sem deixar rastro.
+!macro customUnInstall
+  nsExec::ExecToLog 'schtasks /Delete /TN "Ryke Desk" /F'
+  nsExec::ExecToLog 'schtasks /Delete /TN "RykeDesk-Admin" /F'
+  nsExec::ExecToLog 'schtasks /Delete /TN "RykeDesk-SAS" /F'
+  ; Tira a regra de firewall que abrimos na instalação — sem deixar rastro.
+  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Ryke Desk"'
 !macroend

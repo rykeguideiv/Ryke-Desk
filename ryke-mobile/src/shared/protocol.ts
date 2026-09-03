@@ -228,6 +228,27 @@ export type CtrlMeta = {
   hostName: string;
   displays: { id: number; label: string; primary: boolean }[];
   activeDisplay: number;
+  /**
+   * Placa de vídeo do ANFITRIÃO e se ele codifica por hardware.
+   *
+   * Vai junto porque quem sente o atraso é o visitante, mas quem codifica a tela
+   * é o anfitrião: é a placa DELE que decide se o vídeo sai por hardware (rápido)
+   * ou por software (a causa mais comum de "digito e aparece dois segundos
+   * depois"). Opcional para não quebrar quem estiver numa versão sem o campo.
+   */
+  hostGpu?: { nome: string; encode: boolean; decode: boolean };
+  /**
+   * O anfitrião está capturando a tela pela rota reserva por SOFTWARE (lenta)?
+   *
+   * Acontece quando o `getDisplayMedia` não sobe — driver de vídeo genérico
+   * depois de formatar o Windows é o motivo campeão. É uma causa de atraso que
+   * a placa habilitada não denuncia, por isso viaja separada.
+   */
+  hostCapturaSoftware?: boolean;
+  /** Motivos técnicos reais de a captura ter caído na rota lenta (para diagnóstico honesto, sem palpite). */
+  hostCapturaMotivo?: string;
+  /** O anfitrião está em modo ADMINISTRADOR agora? (Para o botão do visitante refletir o estado.) */
+  hostElevado?: boolean;
 };
 
 /**
@@ -314,6 +335,18 @@ export type CtrlClipboard = { t: 'clip'; value: string };
 export type CtrlDisplay = { t: 'display'; id: number };
 export type CtrlRunInstaller = { t: 'run-installer' };
 export type CtrlRunInstallerResult = { t: 'run-installer-result'; ok: boolean; canceled?: boolean; message: string };
+/**
+ * O visitante pede ao anfitrião para trocar de modo.
+ *
+ * `ligar: true` reabre o anfitrião como ADMINISTRADOR (sem UAC, via tarefa
+ * agendada) — necessário para instalar programas ou mexer em janelas de admin no
+ * PC remoto. `ligar: false` volta ao modo normal. Trocar de modo REABRE o
+ * processo do anfitrião: a sessão cai e é preciso reconectar. E, enquanto
+ * elevado, a captura de tela do Windows não funciona por hardware (é a
+ * incompatibilidade que motivou o modo normal), então a imagem fica lenta — por
+ * isso é um modo temporário, para a tarefa e volta.
+ */
+export type CtrlAdmin = { t: 'admin'; ligar: boolean };
 export type CtrlQuality = { t: 'quality'; preset: 'auto' | 'baixa' | 'media' | 'alta' };
 export type CtrlBlockInput = { t: 'block-input'; on: boolean };
 export type CtrlPing = { t: 'ping'; at: number };
@@ -340,7 +373,42 @@ export type CtrlPong = { t: 'pong'; at: number; q?: number };
  * lida do Windows do outro lado. Assim, quando a pessoa que está lá mexe no
  * mouse dela, a seta marcada se mexe junto, e o visitante vê isso acontecer.
  */
-export type CtrlCursor = { t: 'cursor'; x: number; y: number };
+/**
+ * A FORMA que o ponteiro remoto assume, conforme o que há embaixo dele no
+ * anfitrião — texto sobre um campo, redimensionar sobre uma borda, mãozinha
+ * sobre um link. Os nomes são iguais aos valores de `cursor` do CSS de
+ * propósito, para o visitante repassar direto ao próprio cursor do sistema.
+ *
+ * Mora aqui, e não junto do desenho das setas, porque é parte do contrato entre
+ * os dois lados: o computador e o celular precisam concordar sobre estes nomes.
+ */
+export type TipoCursor =
+  | 'default'
+  | 'text'
+  | 'pointer'
+  | 'ew-resize'
+  | 'ns-resize'
+  | 'nesw-resize'
+  | 'nwse-resize'
+  | 'move'
+  | 'wait'
+  | 'progress'
+  | 'crosshair'
+  | 'not-allowed'
+  | 'help';
+
+export type CtrlCursor = { t: 'cursor'; x: number; y: number; tipo?: TipoCursor };
+
+/**
+ * "A SUA seta, neste instante, tem esta forma."
+ *
+ * Vai do anfitrião para cada visitante, e diz que forma o cursor assumiria no
+ * ponto onde a seta daquele visitante está — texto sobre um campo, redimensionar
+ * sobre a borda de uma janela, mãozinha sobre um link. O visitante usa isto para
+ * trocar a forma do PRÓPRIO cursor do sistema (nítido e sem atraso), sem perder
+ * a cor que o identifica. Só muda quando a forma muda.
+ */
+export type CtrlCursorForma = { t: 'cursor-forma'; tipo: TipoCursor };
 
 /**
  * "Você é o visitante número N; a sua seta é esta cor."
@@ -370,7 +438,7 @@ export type CtrlCor = { t: 'cor'; indice: number; nome: string };
  */
 export type CtrlPonteiros = {
   t: 'ponteiros';
-  lista: { id: string; nome: string; cor: number; x: number; y: number }[];
+  lista: { id: string; nome: string; cor: number; x: number; y: number; tipo?: TipoCursor }[];
 };
 
 export type CtrlMessage =
@@ -390,11 +458,13 @@ export type CtrlMessage =
   | CtrlDisplay
   | CtrlRunInstaller
   | CtrlRunInstallerResult
+  | CtrlAdmin
   | CtrlQuality
   | CtrlBlockInput
   | CtrlPing
   | CtrlPong
   | CtrlCursor
+  | CtrlCursorForma
   | CtrlCor
   | CtrlPonteiros
   | FileControl;

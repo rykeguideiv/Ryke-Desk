@@ -7,12 +7,13 @@
  * WebRTC do Chromium — que é justamente o que nos dá NAT traversal,
  * criptografia e codificação de vídeo por hardware de graça.
  */
-import { app, BrowserWindow, ipcMain, shell, clipboard, dialog, desktopCapturer, session, powerSaveBlocker, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, clipboard, dialog, desktopCapturer, session, powerSaveBlocker, screen, Tray, Menu, nativeImage } from 'electron';
 import { dirname, extname, join } from 'node:path';
 import { release } from 'node:os';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
+import { appendFileSync, statSync, renameSync } from 'node:fs';
 import { isElevated, permitirArrastarArquivos } from './elevation';
 
 import { Store } from './store';
@@ -31,14 +32,93 @@ import {
 } from './auth';
 import * as input from './input';
 import * as tecladoGlobal from './teclado-global';
-import { definirPoliticaSas, enviarSas, estadoSas } from './sas';
+import { definirPoliticaSas, enviarSas, estadoSas, dispararComoSistema } from './sas';
 import { listDisplays, findDisplay, toPhysicalPoint, toFraction } from './screen';
 import { ipLocal } from './network';
 import { copiarArquivos, lerArquivosCopiados } from './clipboard-arquivos';
 import type { Papel } from '../shared/config';
 import { SERVIDOR_PADRAO } from '../shared/servidor-padrao';
 import type { PerfilCapturaSoftware } from '../shared/qualidade-captura';
-import type { Ponteiro } from '../shared/ponteiros';
+import type { Ponteiro, TipoCursor } from '../shared/ponteiros';
+
+// Lançado como SISTEMA por uma tarefa agendada, só para disparar o
+// Ctrl+Alt+Del (ver `enviarSas` em sas.ts). Faz a única coisa que precisa e sai
+// ANTES de qualquer inicialização — sem janela, sem GPU, sem trava de instância
+// (esta cópia é efêmera e não disputa o número Ryke).
+if (process.argv.includes('--sas')) {
+  dispararComoSistema();
+  process.exit(0);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// A CAUSA RAIZ DA LENTIDÃO: JANELA OCULTA NA BANDEJA SENDO ESTRANGULADA.
+//
+// O Ryke Desk abre minimizado no ícone perto do relógio (foi pedido). Só que
+// toda a pilha de vídeo — capturar a tela, codificar, enviar — vive no renderer
+// dessa janela. E o Chromium, por padrão, PENALIZA janelas ocultas/ocluídas:
+//   • estrangula timers e renderização (a captura passa a rodar em câmera lenta);
+//   • marca a janela como "ocluída" e SUSPENDE a aceleração por GPU — jogando a
+//     codificação do vídeo de volta no processador.
+//
+// É exatamente o quadro relatado: um PC com placa dedicada e driver atual, mas
+// o vídeo "saindo pelo software, não pela placa", com atraso constante que não
+// melhora ao baixar a qualidade. E é a REGRESSÃO desde a 1.0.5 — que abria a
+// janela normalmente, sem nunca ficar oculta, e por isso não sofria disto.
+//
+// Os quatro ajustes abaixo desligam essa penalização. Com eles, a janela pode
+// ficar escondida na bandeja o tempo todo que o vídeo continua saindo pela GPU,
+// na velocidade cheia. É o coração do conserto de desempenho desta versão.
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
+// disable-features aceita uma lista única (chamar de novo sobrescreve), então
+// juntamos tudo aqui:
+//   • CalculateNativeWinOcclusion — impede o Chromium de declarar a janela
+//     oculta como "ocluída" e suspender GPU/pintura. É o par indispensável dos
+//     switches acima para o host que roda na bandeja.
+//   • WebRtcHideLocalIpsWithMdns — revela os IPs locais para o P2P DIRETO fechar
+//     mais rápido, sem mascarar candidatos atrás de nomes mDNS.
+app.commandLine.appendSwitch(
+  'disable-features',
+  'CalculateNativeWinOcclusion,WebRtcHideLocalIpsWithMdns',
+);
+
+// SEMPRE a melhor GPU para codificar a tela, e sem deixar a lista de bloqueio
+// do Chromium barrar o codificador de hardware.
+//
+// force-high-performance-gpu: o Windows entrega a placa DEDICADA quando existe
+// (NVIDIA/AMD, onde vivem NVENC/VCE); sem dedicada, a INTEGRADA do processador
+// (Intel Quick Sync / AMD), que também codifica por hardware. Automático.
+//
+// ignore-gpu-blocklist: alguns pares placa+driver entram numa lista de bloqueio
+// conservadora do Chromium que desliga o encode por hardware "por precaução".
+// Numa ferramenta de acesso remoto isso é justamente o que não queremos — o
+// resultado é o vídeo caindo no processador. Ignorar a lista devolve o NVENC.
+app.commandLine.appendSwitch('force-high-performance-gpu');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+
+// ─────────────────────────────────────────────────────────────────────
+// A CORREÇÃO DA LENTIDÃO DE VERDADE (descoberta pelo log de diagnóstico).
+//
+// O app roda como ADMINISTRADOR. E o Chromium, quando elevado, não consegue
+// montar o sandbox do PROCESSO DE GPU e simplesmente DESLIGA a GPU inteira
+// (`getGPUFeatureStatus` vira `encode=disabled_software`, `decode=disabled_software`).
+// Com a GPU desligada, a captura de tela do Windows — que usa a Desktop
+// Duplication API e depende de um dispositivo D3D da placa — NÃO INICIA, e
+// devolve "NotReadableError: Could not start video source". Aí o app cai na rota
+// reserva por canvas, que roda a ~1 quadro por segundo. Era ISSO a lentidão.
+//
+// `disable-gpu-sandbox` desliga APENAS o sandbox do processo de GPU (não o
+// sandbox dos renderers). É o ajuste padrão para apps Electron elevados: deixa a
+// GPU inicializar de novo, o que devolve o encode por hardware E faz a captura
+// de tela voltar a funcionar em velocidade cheia. Num app que já roda como
+// administrador, o sandbox da GPU não era a fronteira de segurança relevante.
+app.commandLine.appendSwitch('disable-gpu-sandbox');
+
+// Sob nenhuma hipótese desligamos a aceleração por hardware. Deixado explícito
+// para ninguém reintroduzir um `disableHardwareAcceleration` "por estabilidade"
+// e, com isso, jogar toda a codificação de volta no processador.
 
 // Duas cópias abertas disputariam o mesmo número Ryke na malha.
 if (!app.requestSingleInstanceLock()) {
@@ -95,6 +175,21 @@ const throttle = new Throttle();
 const chavesDeSessao = new Map<string, Buffer>();
 
 let mainWindow: BrowserWindow | null = null;
+/** O ícone perto do relógio. Mantém o programa vivo mesmo com a janela fechada. */
+let tray: Tray | null = null;
+/**
+ * Só uma saída de verdade fecha o programa; fechar a janela apenas o esconde
+ * no ícone perto do relógio. Sem esta trava, o "Sair" do menu e a substituição
+ * de arquivos pelo instalador não conseguiriam encerrar o processo.
+ */
+let encerrando = false;
+/**
+ * O atalho que abre o Ryke Desk junto com o Windows passa `--minimizado`.
+ * Nesse caso a janela nasce escondida no ícone perto do relógio: o programa já
+ * está na malha e pronto para receber acesso, sem roubar a tela de quem acabou
+ * de ligar o computador.
+ */
+const iniciarMinimizado = process.argv.includes('--minimizado');
 let captureDisplayId: number | null = null;
 let ultimoPerfilCapturaSoftware: {
   mime: 'image/jpeg' | 'image/png';
@@ -160,10 +255,15 @@ function comecarARelatarCursor(): void {
     const fracao = ponto ? toFraction(captureDisplayId, ponto.x, ponto.y) : null;
     // Fora da tela capturada (outro monitor): não há onde desenhar.
     if (fracao) {
-      const marca = `${fracao.x.toFixed(4)},${fracao.y.toFixed(4)}`;
+      // A FORMA vai junto da posição: assim a seta do anfitrião que o visitante
+      // desenha vira viga de texto, redimensionar ou mãozinha conforme o cursor
+      // real de lá. Entra na marca para uma troca de forma sem mexer o cursor
+      // (parado sobre um campo) também ser enviada.
+      const tipo = input.cursorShape();
+      const marca = `${fracao.x.toFixed(4)},${fracao.y.toFixed(4)},${tipo}`;
       if (marca !== ultimoCursor) {
         ultimoCursor = marca;
-        mainWindow?.webContents.send('cursor:posicao', fracao);
+        mainWindow?.webContents.send('cursor:posicao', { x: fracao.x, y: fracao.y, tipo });
       }
     }
 
@@ -332,7 +432,27 @@ function ponteirosDaCamada(): Ponteiro[] {
     x: p.x,
     y: p.y,
     oculta: emModoGamer.has(id),
+    tipo: formaDoPonteiro(id, p.x, p.y),
   }));
+}
+
+/** Este visitante está com o cursor real na mão — arrastando ou clicando? */
+function controlaCursorReal(peerId: string): boolean {
+  return emprestimo?.dono === peerId || (botoesSegurados.get(peerId)?.size ?? 0) > 0;
+}
+
+/**
+ * Que forma a seta deste visitante deve ter.
+ *
+ * Se ele está com o cursor real (arrasto/clique), a forma é a do cursor de
+ * verdade — precisa: é aí que o "arrastar a borda" vira redimensionar dentro de
+ * qualquer programa. Se só paira, perguntamos à janela sob o ponto, sem mover
+ * nada. Ver `cursorShape`/`cursorShapeAtPoint`.
+ */
+function formaDoPonteiro(peerId: string, fx: number, fy: number): TipoCursor {
+  if (controlaCursorReal(peerId)) return input.cursorShape();
+  const fisico = toPhysicalPoint(captureDisplayId, fx, fy);
+  return input.cursorShapeAtPoint(fisico.x, fisico.y);
 }
 
 /**
@@ -479,6 +599,95 @@ function registrarPonteiro(peerId: string, fx: number, fy: number): void {
 
 // ─────────────────────────── janela ───────────────────────────────
 
+/**
+ * Caminho do ícone do aplicativo, tanto instalado quanto rodando do build.
+ *
+ * Empacotado, `extraResources` copia os ícones para a pasta `resources`, ao
+ * lado do executável — a pasta `build` do projeto não vai junto. Rodando do
+ * código, eles ficam em `build/` na raiz.
+ */
+function iconePath(): string {
+  const nome = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+  return app.isPackaged ? join(process.resourcesPath, nome) : join(app.getAppPath(), 'build', nome);
+}
+
+/** Traz a janela de volta do ícone perto do relógio para a frente. */
+function mostrarJanela(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/**
+ * Reabre o Ryke Desk no OUTRO nível de privilégio.
+ *
+ * O app roda SEM elevação de propósito — é a única forma de a captura de tela
+ * funcionar (o Chromium não consegue capturar a tela quando elevado). Mas às
+ * vezes é preciso admin no PC remoto (instalar um programa, mexer numa janela
+ * que pede administrador). Este botão troca de modo sem prompt de UAC:
+ *
+ *   • para ADMIN: dispara a tarefa "RykeDesk-Admin" (RL HIGHEST), que sobe o app
+ *     elevado SEM a janela de UAC — o que é essencial numa sessão remota, onde
+ *     essa janela apareceria na área de trabalho segura, invisível para quem
+ *     controla. (Enquanto elevado, a captura fica lenta — é o preço de ter admin,
+ *     e por isso é um modo temporário, para a tarefa e volta.)
+ *   • para NORMAL: relança pelo explorer.exe, que "des-eleva" e devolve a captura
+ *     rápida.
+ *
+ * Um lançador destacado espera este processo sair (soltando a trava de instância
+ * única) antes de subir a outra cópia; sem essa espera, a nova bateria na trava.
+ */
+function trocarModo(elevado: boolean): void {
+  const exe = process.execPath;
+  const comando = elevado
+    ? 'ping 127.0.0.1 -n 4 >nul & schtasks /Run /TN "RykeDesk-Admin"'
+    : `ping 127.0.0.1 -n 4 >nul & explorer.exe "${exe}"`;
+  try {
+    spawn('cmd.exe', ['/c', comando], { detached: true, windowsHide: true, stdio: 'ignore' }).unref();
+  } catch {
+    /* se o lançador falhar, ao menos não deixamos o app num limbo */
+  }
+  encerrando = true;
+  app.quit();
+}
+
+/**
+ * O ícone perto do relógio.
+ *
+ * É ele que sustenta o "sempre minimizado": ao abrir junto com o Windows, ou
+ * ao fechar a janela, o programa continua vivo na malha e à disposição, sem
+ * ocupar a tela. Um clique traz a janela de volta; "Sair" encerra de verdade.
+ */
+function criarTray(): void {
+  if (tray) return;
+  try {
+    const img = nativeImage.createFromPath(iconePath());
+    tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img);
+  } catch {
+    tray = new Tray(nativeImage.createEmpty());
+  }
+  tray.setToolTip('Ryke Desk');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Abrir Ryke Desk', click: () => mostrarJanela() },
+      { type: 'separator' },
+      {
+        label: 'Sair',
+        click: () => {
+          encerrando = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+  tray.on('click', () => mostrarJanela());
+  tray.on('double-click', () => mostrarJanela());
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1180,
@@ -489,20 +698,37 @@ function createWindow(): void {
     frame: false,
     backgroundColor: '#0a0e1a',
     title: 'Ryke Desk',
-    icon: join(__dirname, '../../build/icon.png'),
+    icon: iconePath(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      // A janela vive escondida na bandeja enquanto compartilha a tela. Sem isto,
+      // o Chromium estrangula os timers do renderer quando a janela não está
+      // visível — e é o renderer que captura, codifica e envia o vídeo. Desligar
+      // o estrangulamento é o que mantém a sessão em velocidade cheia minimizada.
+      backgroundThrottling: false,
     },
   });
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow?.show();
+    // Aberto junto com o Windows: nasce escondido no ícone perto do relógio.
+    if (!iniciarMinimizado) mainWindow?.show();
     // Rodando elevados, o Explorador (que é comum) não conseguiria nos enviar
     // arquivos arrastados. Esta exceção pontual devolve o recurso.
     if (mainWindow && isElevated()) permitirArrastarArquivos(mainWindow);
+  });
+
+  /**
+   * Fechar a janela apenas esconde no ícone perto do relógio — o programa
+   * continua na malha, pronto para receber acesso. Só o "Sair" do menu (ou o
+   * instalador substituindo os arquivos) encerra de verdade.
+   */
+  mainWindow.on('close', (evento) => {
+    if (encerrando) return;
+    evento.preventDefault();
+    mainWindow?.hide();
   });
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -818,6 +1044,21 @@ function registerIpc(): void {
     elevated: isElevated(),
     abi: input.verifyAbi(),
   }));
+
+  // Placa de vídeo em uso e se o vídeo está por hardware. É a resposta, sem
+  // adivinhação, para "está usando a GPU mesmo?" — e o anfitrião a manda junto
+  // do meta, para o visitante ver a placa da máquina que ESTÁ CODIFICANDO.
+  ipcMain.handle('gpu:status', () => statusGpu());
+
+  // O renderer despeja aqui os fatos da sessão (rota de captura, rede) para o
+  // arquivo de diagnóstico. É como a causa da lentidão vira algo legível no
+  // disco depois, em vez de sumir no console de um app empacotado.
+  ipcMain.on('diag:log', (_e, linha: string) => registrarDiag(String(linha).slice(0, 2000)));
+
+  // Trocar entre modo normal (rápido) e administrador (para instalar/mexer em
+  // janelas de admin no PC remoto). Ver `trocarModo`.
+  ipcMain.handle('modo:elevar', () => trocarModo(true));
+  ipcMain.handle('modo:normal', () => trocarModo(false));
 
   ipcMain.handle('identity:get', () => store.getIdentity());
   ipcMain.handle('identity:save', (_e, id: string, token: string) => {
@@ -1482,10 +1723,8 @@ function registerIpc(): void {
 // ─────────────────────────── ciclo de vida ────────────────────────
 
 app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  }
+  // Abrir de novo (atalho, menu Iniciar) traz a janela de volta do ícone.
+  mostrarJanela();
 });
 
 app.whenReady().then(async () => {
@@ -1504,15 +1743,131 @@ app.whenReady().then(async () => {
   clipboardWatcher.start();
 
   createWindow();
+  criarTray();
+  registrarStatusGpu();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-app.on('window-all-closed', () => app.quit());
+/**
+ * Nome legível da placa a partir da linha crua do ANGLE.
+ *
+ * O `glRenderer` vem como "ANGLE (NVIDIA, NVIDIA GeForce GTX 960 Direct3D11
+ * vs_5_0 ps_5_0, D3D11)". Ninguém quer ler isso na barra: extraímos só o miolo
+ * — "NVIDIA GeForce GTX 960".
+ */
+function nomeAmigavelGpu(glRenderer: string | undefined): string {
+  if (!glRenderer) return 'GPU desconhecida';
+  const m = /ANGLE \([^,]+,\s*(.+?)\s+(?:Direct3D|OpenGL|Vulkan|D3D)/i.exec(glRenderer);
+  const bruto = m ? m[1] : glRenderer;
+  return bruto
+    .replace(/\bDirect3D\d+\b/gi, '')
+    .replace(/\bvs_\d+_\d+\b|\bps_\d+_\d+\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim() || 'GPU desconhecida';
+}
+
+/**
+ * Registro em ARQUIVO do diagnóstico da sessão.
+ *
+ * O console de um app empacotado (aberto sem terminal) se perde. Mas a causa da
+ * lentidão precisa aterrissar em algum lugar legível DEPOIS do fato — este
+ * arquivo é esse lugar. Grava a rota de captura (hardware x a rota lenta) com o
+ * motivo real, o estado da GPU e um resumo da rede. É o que transforma "está
+ * lento" em "getDisplayMedia falhou por tal motivo", sem depender de reproduzir
+ * na minha máquina. Fica em: %APPDATA%/ryke-desk/ryke-diagnostico.log
+ */
+function caminhoDiag(): string {
+  return join(app.getPath('userData'), 'ryke-diagnostico.log');
+}
+function registrarDiag(linha: string): void {
+  try {
+    const arquivo = caminhoDiag();
+    // Um teto simples para o arquivo não crescer sem fim numa máquina que fica
+    // sempre ligada: ao passar de 512 KB, vira .old e recomeça.
+    try {
+      if (statSync(arquivo).size > 512 * 1024) renameSync(arquivo, arquivo + '.old');
+    } catch {
+      /* ainda não existe */
+    }
+    appendFileSync(arquivo, `${new Date().toISOString()} ${linha}\n`, 'utf8');
+  } catch {
+    /* diagnóstico nunca pode derrubar o app */
+  }
+}
+
+export type StatusGpu = { nome: string; encode: boolean; decode: boolean; brutoEncode: string; brutoDecode: string };
+
+// A placa não troca no meio da sessão; guardamos o primeiro bom resultado para
+// não repetir o getGPUInfo, que não é barato. Só cacheamos quando o nome já
+// veio de verdade — nos primeiros segundos o processo de GPU ainda sobe e tudo
+// aparece desligado/desconhecido, e cachear isso seria mentir para a barra.
+let gpuCache: StatusGpu | null = null;
+async function statusGpu(): Promise<StatusGpu> {
+  if (gpuCache) return gpuCache;
+  try {
+    const status = app.getGPUFeatureStatus();
+    const brutoEncode = String(status.video_encode ?? '');
+    const brutoDecode = String(status.video_decode ?? '');
+    // Qualquer 'enabled…' (enabled, enabled_readback, enabled_force) é por
+    // hardware; 'disabled_software'/'unavailable_software'/'disabled…' significam
+    // que o processador está fazendo o serviço. Usamos o prefixo para não gritar
+    // "software" à toa numa variação de estado que ainda é a placa.
+    const encode = brutoEncode.startsWith('enabled');
+    const decode = brutoDecode.startsWith('enabled');
+    let nome = 'GPU desconhecida';
+    try {
+      const info = (await app.getGPUInfo('complete')) as { auxAttributes?: { glRenderer?: string } };
+      nome = nomeAmigavelGpu(info.auxAttributes?.glRenderer);
+    } catch {
+      /* getGPUInfo pode não existir em algum ambiente */
+    }
+    const resultado: StatusGpu = { nome, encode, decode, brutoEncode, brutoDecode };
+    // Só cacheamos um resultado DEFINITIVAMENTE bom (nome real + encode por
+    // hardware). Nos primeiros segundos o subsistema de encode da GPU ainda
+    // sobe e pode reportar 'disabled' por um instante; cachear isso deixaria o
+    // selo preso em "SW" para o resto da sessão, mesmo já estando por hardware.
+    // Enquanto não for bom, relemos a cada chamada (barato e raro).
+    if (nome !== 'GPU desconhecida' && encode) gpuCache = resultado;
+    return resultado;
+  } catch {
+    return { nome: 'GPU desconhecida', encode: false, decode: false, brutoEncode: '', brutoDecode: '' };
+  }
+}
+
+/**
+ * Anota no log qual placa entrou e se o vídeo está mesmo por hardware.
+ *
+ * É a confirmação, sem adivinhação, do "reconhecimento automático": diz a placa
+ * ativa (a dedicada, ou a integrada quando não há dedicada) e se o codificador
+ * de hardware está ligado. Se um dia aparecer `video_encode = disabled`, o
+ * culpado é driver de vídeo ou a placa na lista de bloqueio do Chromium — e
+ * este log é o primeiro lugar onde isso fica visível.
+ */
+function registrarStatusGpu(): void {
+  // Um respiro para o processo de GPU subir; antes dele, tudo aparece desligado.
+  setTimeout(() => {
+    void statusGpu().then((g) => {
+      const linha = `[gpu] placa=${g.nome} | encode=${g.brutoEncode} decode=${g.brutoDecode} | elevado=${isElevated()}`;
+      console.log(linha);
+      registrarDiag(linha);
+    });
+  }, 3000);
+}
+
+// A janela agora só se esconde no ícone perto do relógio, então este evento
+// praticamente não dispara em uso normal. Fica como rede de segurança: se a
+// última janela realmente sumir e já estamos encerrando, o programa fecha.
+app.on('window-all-closed', () => {
+  if (encerrando) app.quit();
+});
 
 app.on('before-quit', () => {
+  encerrando = true;
+  tray?.destroy();
+  tray = null;
   // Deixar um Ctrl preso ou o teclado bloqueado seria um desastre para o dono
   // do computador anfitrião.
   clipboardWatcher.stop();

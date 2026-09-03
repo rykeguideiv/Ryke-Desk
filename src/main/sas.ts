@@ -132,13 +132,39 @@ export function definirPoliticaSas(ligar: boolean): { ok: boolean; motivo: strin
   return { ok: true, motivo: ligar ? 'Ctrl+Alt+Del remoto liberado neste computador.' : 'Ctrl+Alt+Del remoto bloqueado.' };
 }
 
+/** Nome da tarefa que dispara o SAS como SISTEMA. Ver `enviarSas`. */
+const TAREFA_SAS = 'RykeDesk-SAS';
+
+/**
+ * Dispara o SAS a partir de um processo rodando como SISTEMA.
+ *
+ * Chamado pelo próprio Ryke Desk quando lançado com `--sas` pela tarefa
+ * agendada abaixo. Aqui `SendSAS(0)` é o CERTO: 0 = "sou um serviço LocalSystem",
+ * e é esse o contexto em que a tarefa nos coloca. Ver o porquê em `enviarSas`.
+ */
+export function dispararComoSistema(): void {
+  if (!carregar() || !sas) return;
+  sas.SendSAS(0);
+}
+
 /**
  * Dispara o Ctrl+Alt+Del nesta máquina.
  *
- * `SendSAS` devolve void — não há código de retorno para conferir. Por isso o
- * diagnóstico acontece ANTES: conferimos elevação e política, e só chamamos
- * quando as duas estão de pé. Chamar às cegas e dizer "enviado" seria repetir
- * o defeito original, que era um botão silencioso.
+ * POR QUE ISTO PRECISOU MUDAR
+ *
+ * O código antigo chamava `SendSAS(0)` direto do processo elevado, e não
+ * acontecia nada — dizia "enviado" e a tela de segurança não vinha. O motivo é
+ * do Windows: `SendSAS(FALSE)` só funciona de um SERVIÇO rodando como
+ * LocalSystem, e `SendSAS(TRUE)` só de um app de ACESSIBILIDADE assinado
+ * (uiAccess). O Ryke Desk não é nem um nem outro — é um app comum, elevado —,
+ * então as duas formas eram um botão mudo.
+ *
+ * O CAMINHO QUE FUNCIONA é o mesmo dos programas de acesso remoto sérios: uma
+ * peça rodando como SISTEMA. Em vez de instalar um serviço, reaproveitamos o
+ * Agendador de Tarefas: criamos uma tarefa que roda o PRÓPRIO Ryke Desk como
+ * SISTEMA, só para chamar `SendSAS(0)` (ver `dispararComoSistema`), e a
+ * disparamos na hora. É a tarefa que dá o contexto LocalSystem que o Windows
+ * exige — sem serviço para instalar e sem certificado de assinatura.
  */
 export function enviarSas(): { ok: boolean; motivo: string } {
   const estado = estadoSas();
@@ -161,12 +187,21 @@ export function enviarSas(): { ok: boolean; motivo: string } {
     };
   }
 
-  try {
-    // 0 = disparar como o sistema, que é o que faz a tela de segurança
-    // aparecer para quem estiver na sessão interativa.
-    sas!.SendSAS(0);
-    return { ok: true, motivo: 'Ctrl+Alt+Del enviado.' };
-  } catch (err) {
-    return { ok: false, motivo: `O Windows recusou o Ctrl+Alt+Del: ${err instanceof Error ? err.message : String(err)}` };
+  const exe = process.execPath;
+  // Cria/atualiza a tarefa que roda o Ryke Desk como SISTEMA com `--sas`. `/F`
+  // sobrescreve, então é idempotente; criar exige admin, que já temos.
+  const criar = spawnSync(
+    'schtasks',
+    ['/Create', '/TN', TAREFA_SAS, '/TR', `"${exe}" --sas`, '/SC', 'ONCE', '/ST', '00:00', '/RU', 'SYSTEM', '/RL', 'HIGHEST', '/F'],
+    { windowsHide: true, encoding: 'utf8' },
+  );
+  if (criar.status !== 0) {
+    return { ok: false, motivo: `Não foi possível preparar o Ctrl+Alt+Del: ${(criar.stderr ?? '').trim()}`.trim() };
   }
+  // Dispara agora. A tarefa sobe o Ryke Desk como SISTEMA, ele chama SendSAS e sai.
+  const rodar = spawnSync('schtasks', ['/Run', '/TN', TAREFA_SAS], { windowsHide: true, encoding: 'utf8' });
+  if (rodar.status !== 0) {
+    return { ok: false, motivo: `O Windows recusou disparar o Ctrl+Alt+Del: ${(rodar.stderr ?? '').trim()}`.trim() };
+  }
+  return { ok: true, motivo: 'Ctrl+Alt+Del enviado.' };
 }

@@ -754,58 +754,32 @@ async function principal() {
   await abrirMenuImagem();
   check('Baixa ficou selecionada', (await qualidadeAtiva()) === 'Baixa', String(await qualidadeAtiva()));
 
-  // Agora a alta: é a única que pergunta antes de ficar.
+  // A alta agora é escolha definitiva: aplica na hora, SEM a confirmação de 20
+  // segundos e SEM reverter sozinha. Só o 'auto' muda de qualidade por conta
+  // própria (quem manda ali é o adaptador de rede, no anfitrião).
   check('clique em Alta registrado', (await escolherQualidade('Alta')) === true);
-  const contagem = await visitante.esperar(
-    `(() => { const e = document.querySelector('.confirma-qualidade b'); return e ? Number(e.textContent.replace(/[^0-9]/g,'')) : null; })()`,
-    8000,
-  );
-  check('escolher Alta pede confirmação com contagem', typeof contagem === 'number' && contagem > 0,
-    `${contagem}s`);
-
-  await dorme(3000);
+  await dorme(2500);
   const fonteAlta = await anfitriao.avaliar(`window.ryke.screen.captureStatus()`);
-  check('Alta muda de fato a fonte reserva para imagem sem perdas',
-    fonteBaixa?.mime === 'image/jpeg' && fonteAlta?.mime === 'image/png' && fonteAlta?.lossless === true,
-    `${fonteBaixa?.mime ?? 'nenhuma'} → ${fonteAlta?.mime ?? 'nenhuma'}`);
-  const contagemDepois = await visitante.avaliar(
-    `(() => { const e = document.querySelector('.confirma-qualidade b'); return e ? Number(e.textContent.replace(/[^0-9]/g,'')) : null; })()`,
-  );
-  check('a contagem regressiva anda sozinha', typeof contagemDepois === 'number' && contagemDepois < contagem,
-    `${contagem}s → ${contagemDepois}s`);
-
-  await visitante.avaliar(
-    `(() => { const b = [...document.querySelectorAll('.confirma-qualidade .btn')].find(x => /manter/i.test(x.textContent)); if (b) b.click(); return !!b; })()`,
-  );
-  const sumiu = await visitante.esperar(`!document.querySelector('.confirma-qualidade')`, 8000);
-  check('clicar em OK faz o aviso sumir', sumiu === true);
+  const semAvisoAlta = await visitante.avaliar(`!document.querySelector('.confirma-qualidade')`);
+  check('escolher Alta NÃO pede mais confirmação de 20 segundos', semAvisoAlta === true);
+  check('Alta melhora de fato a fonte reserva (mais qualidade que a Baixa)',
+    typeof fonteAlta?.jpegQuality === 'number' && typeof fonteBaixa?.jpegQuality === 'number' &&
+      fonteAlta.jpegQuality > fonteBaixa.jpegQuality,
+    `baixa q${fonteBaixa?.jpegQuality ?? '?'} → alta q${fonteAlta?.jpegQuality ?? '?'}`);
 
   await abrirMenuImagem();
-  check('e a qualidade alta permanece', (await qualidadeAtiva()) === 'Alta', String(await qualidadeAtiva()));
+  check('Alta ficou selecionada', (await qualidadeAtiva()) === 'Alta', String(await qualidadeAtiva()));
 
-  // ── a trava de verdade: ninguém confirma, e ela se desfaz sozinha ──
+  // ── o conserto pedido: a qualidade manual NÃO cai sozinha ──
   //
-  // Este é o caso que a proteção existe para cobrir. Se a rede não sustenta a
-  // qualidade alta, a imagem passa a chegar tão atrasada que o usuário não
-  // consegue clicar em nada — nem para desfazer. Ele precisa poder apenas
-  // esperar. Vale os 20 segundos que este trecho leva.
-
-  await escolherQualidade('Média');
-  await dorme(600);
+  // O defeito era exatamente este: escolhia-se Alta e, passados uns segundos, a
+  // imagem voltava para a qualidade anterior sem ninguém pedir — era a trava de
+  // 20s se desfazendo. Removida a trava, esperamos MAIS do que aqueles 20
+  // segundos e a escolha continua de pé.
+  await dorme(22_000);
   await abrirMenuImagem();
-  check('voltou para Média antes do teste da reversão', (await qualidadeAtiva()) === 'Média',
-    String(await qualidadeAtiva()));
-
-  await escolherQualidade('Alta');
-  await visitante.esperar(`!!document.querySelector('.confirma-qualidade')`, 8000);
-
-  const revertida = await visitante.esperar(`!document.querySelector('.confirma-qualidade')`, 26_000);
-  check('sem confirmação, o aviso some sozinho no fim do prazo', revertida === true);
-
-  await abrirMenuImagem();
-  const depoisDaReversao = await qualidadeAtiva();
-  check('e a qualidade volta ao que era antes, sem o usuário fazer nada',
-    depoisDaReversao === 'Média', String(depoisDaReversao));
+  check('a qualidade manual permanece — não volta para baixo sozinha',
+    (await qualidadeAtiva()) === 'Alta', String(await qualidadeAtiva()));
 
   // Volta para automática, que é o padrão do produto.
   await escolherQualidade('Automática');

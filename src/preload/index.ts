@@ -9,6 +9,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { Favorito, Papel, ScryptParams, Settings } from '../shared/config';
 import type { PerfilCapturaSoftware } from '../shared/qualidade-captura';
 import type { Ponteiro } from '../shared/ponteiros';
+import type { TipoCursor } from '../shared/protocol';
 
 const api = {
   app: {
@@ -17,8 +18,32 @@ const api = {
         version: string;
         machineName: string;
         configPath: string;
+        elevated: boolean;
         abi: { ok: boolean; inputSize: number };
       }>,
+  },
+
+  /** Trocar entre modo normal (captura rápida) e administrador (para instalar no PC remoto). */
+  modo: {
+    elevar: () => ipcRenderer.invoke('modo:elevar') as Promise<void>,
+    normal: () => ipcRenderer.invoke('modo:normal') as Promise<void>,
+  },
+
+  /** Placa de vídeo em uso e se o vídeo está por hardware (o caminho rápido). */
+  gpu: {
+    status: () =>
+      ipcRenderer.invoke('gpu:status') as Promise<{
+        nome: string;
+        encode: boolean;
+        decode: boolean;
+        brutoEncode: string;
+        brutoDecode: string;
+      }>,
+  },
+
+  /** Grava uma linha no arquivo de diagnóstico (%APPDATA%/ryke-desk/ryke-diagnostico.log). */
+  diag: {
+    log: (linha: string) => ipcRenderer.send('diag:log', linha),
   },
 
   identity: {
@@ -269,7 +294,7 @@ const api = {
      *
      * Só chega enquanto há visitante conectado, e só quando o ponto muda.
      */
-    onCursor: (fn: (ponto: { x: number; y: number }) => void) => subscribe('cursor:posicao', fn),
+    onCursor: (fn: (ponto: { x: number; y: number; tipo?: TipoCursor }) => void) => subscribe('cursor:posicao', fn),
   },
 
   /**

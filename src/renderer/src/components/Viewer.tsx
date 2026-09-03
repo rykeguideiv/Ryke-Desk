@@ -2,7 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatId, formatBytes } from '../../../shared/protocol';
 import { COMBOS } from '../../../shared/keymap';
 import { pointerToFraction, wheelToTicks, type Fraction } from '../lib/geometry';
-import { corDoPonteiro, cursorCssDaSeta, svgDaSeta, type Ponteiro } from '../../../shared/ponteiros';
+import {
+  corDoPonteiro,
+  cursorCssDaSeta,
+  svgDaSeta,
+  svgDoCursorSozinho,
+  hotspotDaSeta,
+  type Ponteiro,
+  type TipoCursor,
+} from '../../../shared/ponteiros';
 import {
   ALCANCE_JANELADO,
   decidirBarra,
@@ -11,7 +19,7 @@ import {
   FAIXA_JANELADO_COM_ABAS,
 } from '../lib/barra';
 import type { Controller, Outgoing, State } from '../lib/controller';
-import type { Quality } from '../lib/session';
+import type { LiveStats, Quality } from '../lib/session';
 import type { TransferView } from '../lib/files';
 import {
   IconMonitor, IconKeyboard, IconFiles, IconFullscreen, IconExitFullscreen, IconJanela,
@@ -32,6 +40,19 @@ import { NovaConexao } from './Modals';
 const ATALHOS_LOCAIS = {
   sair: (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyX',
   telaCheia: (e: KeyboardEvent) => e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyF',
+};
+
+/**
+ * A cor da seta do ANFITRIÃO: clara e neutra, sem entrar na paleta dos
+ * visitantes. Ela muda de FORMA conforme o cursor de lá, mas não de cor — é a
+ * ausência de cor que a identifica como "o dono da máquina".
+ */
+const COR_ANFITRIAO = {
+  nome: '',
+  fill: '#f2f6ff',
+  stroke: '#1b2438',
+  etiqueta: '#1b2438',
+  texto: '#f2f6ff',
 };
 
 /** Versão curta das etapas de conexão, para caber dentro de uma aba. */
@@ -116,6 +137,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   const [showDrawer, setShowDrawer] = useState(false);
   const [toolbarVisible, setToolbarVisible] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [mostrarDiag, setMostrarDiag] = useState(false);
   /**
    * Captura total do teclado.
    *
@@ -526,6 +548,16 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   // torna qualquer trabalho fino insuportável.
   const marcaRef = useRef<HTMLDivElement>(null);
   const cursorRemoto = useRef<Fraction>({ x: 0.5, y: 0.5 });
+  /**
+   * A forma da seta do ANFITRIÃO (viga de texto, redimensionar, mãozinha…).
+   *
+   * No ref para `posicionarMarca` ler o hotspot sem re-render; no estado para o
+   * desenho ser refeito quando — e só quando — a forma muda.
+   */
+  const hostTipo = useRef<TipoCursor>('default');
+  const [hostTipoDesenho, setHostTipoDesenho] = useState<TipoCursor>('default');
+  /** A forma da SUA seta, que troca o cursor do sistema (nítido, sem atraso). */
+  const [minhaForma, setMinhaForma] = useState<TipoCursor>('default');
   /** Último ponto que ESTA máquina mandou — a régua para saber quem mexeu. */
   const lastPoint = useRef<Fraction>({ x: 0.5, y: 0.5 });
 
@@ -574,7 +606,12 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     const marca = marcaRef.current;
     if (marca) {
       const onde = ondeNaTela(cursorRemoto.current);
-      if (onde) marca.style.transform = `translate(${onde.x}px, ${onde.y}px)`;
+      // Desconta o hotspot da forma atual, para o ponto ativo do desenho (a
+      // ponta da seta, o centro da viga…) cair exatamente onde o cursor está.
+      if (onde) {
+        const h = hotspotDaSeta(hostTipo.current);
+        marca.style.transform = `translate(${onde.x - h.x}px, ${onde.y - h.y}px)`;
+      }
     }
     for (const [id, el] of refsOutras.current) {
       const ponto = posicoesOutras.current.get(id);
@@ -589,8 +626,15 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     const soltas = [
       session.on('cursor', (ponto) => {
         cursorRemoto.current = ponto;
+        const tipo = ponto.tipo ?? 'default';
+        if (tipo !== hostTipo.current) {
+          hostTipo.current = tipo;
+          setHostTipoDesenho(tipo);
+        }
         posicionarMarca();
       }),
+      // A SUA seta: o anfitrião diz que forma o cursor teria onde você aponta.
+      session.on('formaPropria', (tipo) => setMinhaForma(tipo)),
       session.on('cor', (cor) => {
         minhaCorRef.current = cor.indice;
         setMinhaCor(cor);
@@ -616,7 +660,13 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         setOutrasSetas((antes) => {
           const igual =
             antes.length === lista.length &&
-            antes.every((a, i) => a.id === lista[i].id && a.cor === lista[i].cor && a.nome === lista[i].nome);
+            antes.every(
+              (a, i) =>
+                a.id === lista[i].id &&
+                a.cor === lista[i].cor &&
+                a.nome === lista[i].nome &&
+                a.tipo === lista[i].tipo,
+            );
           if (igual) return antes;
           for (const id of [...posicoesOutras.current.keys()]) {
             if (!lista.some((p) => p.id === id)) posicoesOutras.current.delete(id);
@@ -647,8 +697,16 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
       palco.style.removeProperty('--seta-propria');
       return;
     }
-    palco.style.setProperty('--seta-propria', cursorCssDaSeta(corDoPonteiro(minhaCor.indice), minhaCor.nome));
-  }, [minhaCor]);
+    // Forma diferente da seta comum: usa o cursor NATIVO do sistema (viga de
+    // texto, redimensionar, mãozinha) — nítido, com o hotspot certo e sem
+    // atraso. Perde a cor por um instante, mas você sabe que é você, e a forma é
+    // o que importa ali. Na seta comum, volta a ser a colorida com o seu nome.
+    if (minhaForma && minhaForma !== 'default') {
+      palco.style.setProperty('--seta-propria', minhaForma);
+    } else {
+      palco.style.setProperty('--seta-propria', cursorCssDaSeta(corDoPonteiro(minhaCor.indice), minhaCor.nome));
+    }
+  }, [minhaCor, minhaForma]);
 
   // Reposiciona quando a lista muda: um elemento recém-criado nasce em (0,0) e
   // ficaria no canto até o próximo pacote chegar.
@@ -875,6 +933,12 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         />
       )}
 
+      {/* Painel de diagnóstico: abre pelo botão na barra, NÃO bloqueia a tela
+          (pode fechar) e o texto é 100% selecionável e copiável — feito para você
+          ler o que está acontecendo e colar aqui. Diz, sem rodeio, se o vídeo
+          está indo pela placa (GPU) ou pelo processador. */}
+      {mostrarDiag && <PainelDiagnostico outgoing={outgoing} onClose={() => setMostrarDiag(false)} />}
+
       {novaConexao && (
         <NovaConexao controller={controller} state={state} onClose={() => setNovaConexao(false)} />
       )}
@@ -1010,15 +1074,10 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
           A sua própria seta não está aqui: ela é o cursor do sistema, colorido
           e nomeado em styles.css / --seta-propria. */}
       <div className="seta-remota" ref={marcaRef} aria-hidden="true">
-        <svg width="16" height="23" viewBox="0 0 16 23">
-          <path
-            d="M1.6 1.2 L1.6 17 L5.4 13.4 L8 19.9 L10.7 18.8 L8.1 12.5 L13.2 12.5 Z"
-            fill="#f2f6ff"
-            stroke="#1b2438"
-            strokeWidth="1.3"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <div
+          className="seta-remota-glifo"
+          dangerouslySetInnerHTML={{ __html: svgDoCursorSozinho(COR_ANFITRIAO, hostTipoDesenho) }}
+        />
         <span>{outgoing.meta?.hostName ?? 'computador remoto'}</span>
       </div>
 
@@ -1035,7 +1094,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
             if (el) refsOutras.current.set(ponteiro.id, el);
             else refsOutras.current.delete(ponteiro.id);
           }}
-          dangerouslySetInnerHTML={{ __html: svgDaSeta(corDoPonteiro(ponteiro.cor), ponteiro.nome) }}
+          dangerouslySetInnerHTML={{ __html: svgDaSeta(corDoPonteiro(ponteiro.cor), ponteiro.nome, ponteiro.tipo) }}
         />
       ))}
 
@@ -1108,6 +1167,8 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         onToggleGamer={alternarGamer}
         escMinimiza={escMinimiza}
         onToggleEsc={alternarEsc}
+        onDiagnostico={() => setMostrarDiag((v) => !v)}
+        diagAberto={mostrarDiag}
       />
 
       {showDrawer && (
@@ -1134,6 +1195,158 @@ function isTypingLocally(target: EventTarget | null): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
 }
 
+/**
+ * Nome curto da placa para caber na barra: tira as palavras de marca que só
+ * ocupam espaço ("NVIDIA GeForce RTX 3060" → "RTX 3060"). O nome inteiro
+ * continua no tooltip do chip, para quem quiser conferir o modelo exato.
+ */
+function nomeCurtoGpu(nome: string): string {
+  const curto = nome
+    .replace(/\b(NVIDIA|GeForce|AMD|Radeon|Intel|Corporation|\(R\)|\(TM\)|Graphics)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return curto || nome;
+}
+
+/**
+ * Traduz os números da sessão numa frase: para ONDE está indo o atraso.
+ *
+ * A ordem das perguntas segue a probabilidade real da causa numa área de
+ * trabalho remota — e cada uma corresponde a um atraso que NÃO melhora ao
+ * baixar a qualidade, que é exatamente o sintoma relatado:
+ *
+ *   1. Conexão indireta (retransmitida): o vídeo dá uma volta por um servidor
+ *      no meio. Atraso constante, alheio à qualidade. Quase sempre é o firewall
+ *      do Windows barrando o caminho direto entre os dois PCs.
+ *   2. Vídeo por software no anfitrião: o PROCESSADOR dele está codificando a
+ *      tela em vez da placa de vídeo. Enche a fila de codificação — o clássico
+ *      "digito e aparece dois segundos depois".
+ *   3. Buffer/quadros: o resto, quando os dois acima estão bem.
+ */
+function diagnosticarSessao(
+  stats: LiveStats | null,
+  hostCapturaSoftware: boolean | undefined,
+  hostCapturaMotivo: string | undefined,
+): { tag: string; texto: string; motivo?: string; ok: boolean } | null {
+  if (!stats || stats.width === 0) return null;
+  if (stats.transport === 'retransmitido')
+    return {
+      tag: 'conexão indireta',
+      texto:
+        'A conexão está passando por um servidor no meio (retransmitida), em vez de ir direto entre os dois ' +
+        'computadores — isso adiciona atraso constante. Libere o Ryke Desk no firewall do Windows nos dois PCs.',
+      ok: false,
+    };
+  if (hostCapturaSoftware)
+    return {
+      tag: 'captura lenta',
+      texto:
+        'A captura de tela do computador controlado não conseguiu usar o caminho rápido do Windows e está numa ' +
+        'rota reserva mais lenta. É isto que está segurando o vídeo — e é do lado de lá, não da rede.',
+      // O motivo técnico real (a exceção que o Windows devolveu), sem palpite.
+      motivo: hostCapturaMotivo,
+      ok: false,
+    };
+  if (stats.atraso > 400)
+    return {
+      tag: 'buffer alto',
+      texto: `A imagem está chegando com ${stats.atraso} ms de espera no buffer antes de aparecer.`,
+      ok: false,
+    };
+  if (stats.fps > 0 && stats.fps < 10)
+    return {
+      tag: 'poucos quadros',
+      texto: `A tela do PC controlado está atualizando a apenas ${stats.fps} quadros por segundo.`,
+      ok: false,
+    };
+  return { tag: 'ok', texto: 'Conexão direta e fluida.', ok: true };
+}
+
+/**
+ * Monta o texto completo do diagnóstico — feito para ser COPIADO e colado.
+ *
+ * Junta tudo o que importa para entender a lentidão num bloco só: se o vídeo vai
+ * pela placa ou pelo processador, a rota de captura e o erro real dela, e os
+ * números da rede. É o que o usuário cola aqui para a gente resolver com fato,
+ * não com palpite.
+ */
+function montarTextoDiagnostico(outgoing: Outgoing): string {
+  const s = outgoing.stats;
+  const m = outgoing.meta;
+  const g = m?.hostGpu;
+  const capturaSoftware = m?.hostCapturaSoftware === true;
+  // O que decide se o vídeo vai pela placa é a ROTA DE CAPTURA (getDisplayMedia =
+  // hardware). O `getGPUFeatureStatus().video_encode` provou ser enganoso: reporta
+  // "software" mesmo com o vídeo indo por hardware a 30 fps. Então o veredito
+  // segue a captura, não aquele campo.
+  const usandoGpu = !capturaSoftware;
+  const linhas = [
+    'Ryke Desk — diagnóstico da sessão',
+    `PC controlado: ${m?.hostName ?? '?'}`,
+    `Placa de vídeo (host): ${g?.nome ?? '(não informado)'}`,
+    `Vídeo pela GPU: ${usandoGpu ? 'SIM (hardware)' : 'NÃO — indo pelo processador (software)'}`,
+    g ? `  aceleração da placa: encode=${g.encode ? 'ligado' : 'desligado'} decode=${g.decode ? 'ligado' : 'desligado'}` : '',
+    `Captura de tela: ${capturaSoftware ? 'ROTA LENTA por software (canvas)' : 'caminho rápido do Windows'}`,
+    capturaSoftware && m?.hostCapturaMotivo ? `  erro da captura: ${m.hostCapturaMotivo}` : '',
+    '',
+    `Conexão: ${s?.transport ?? '?'} · ida-e-volta ${s?.rtt ?? '?'} ms`,
+    `Vídeo: ${s?.width ?? '?'}x${s?.height ?? '?'} · ${s?.fps ?? '?'} quadros/s · ${((s?.kbps ?? 0) / 1000).toFixed(1)} Mb/s`,
+    `Codec: ${s?.codec || '?'} · buffer da imagem: ${s?.atraso ?? '?'} ms · decode: ${s?.aceleracao || '?'}`,
+    `Qualidade escolhida: ${outgoing.quality}`,
+  ];
+  return linhas.filter((l) => l !== '').join('\n');
+}
+
+/**
+ * Painel de Diagnóstico — abre pelo botão da barra.
+ *
+ * Atende ao pedido: não bloqueia a tela (dá para fechar), diz em letras grandes
+ * se o vídeo está indo pela PLACA ou pelo PROCESSADOR, e o texto fica num campo
+ * selecionável (com botão Copiar) para colar aqui. Nada de adivinhação.
+ */
+function PainelDiagnostico({ outgoing, onClose }: { outgoing: Outgoing; onClose: () => void }): React.JSX.Element {
+  const [copiado, setCopiado] = useState(false);
+  const texto = montarTextoDiagnostico(outgoing);
+  const usandoGpu = outgoing.meta?.hostCapturaSoftware !== true;
+  const copiar = async (): Promise<void> => {
+    try {
+      await window.ryke.clipboard.write(texto);
+      setCopiado(true);
+      window.setTimeout(() => setCopiado(false), 1600);
+    } catch {
+      /* se o clipboard falhar, o usuário ainda pode selecionar à mão */
+    }
+  };
+  return (
+    <div className="diag-painel" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="diag-cabecalho">
+        <strong>Diagnóstico da conexão</strong>
+        <button className="icon-btn" onClick={onClose} title="Fechar" aria-label="Fechar">
+          <IconX width={12} height={12} />
+        </button>
+      </div>
+      <div className={`diag-status ${usandoGpu ? 'bom' : 'ruim'}`}>
+        {usandoGpu
+          ? '✓ O vídeo está usando a placa de vídeo (GPU)'
+          : '✗ O vídeo NÃO está usando a placa — está indo pelo processador'}
+      </div>
+      <textarea
+        className="diag-texto"
+        readOnly
+        value={texto}
+        spellCheck={false}
+        onFocus={(e) => e.currentTarget.select()}
+      />
+      <div className="diag-acoes">
+        <button className="btn-diag" onClick={() => void copiar()}>
+          {copiado ? '✓ Copiado!' : 'Copiar tudo'}
+        </button>
+        <span className="diag-dica">Selecione o texto e copie para colar aqui no Claude.</span>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────── barra de ferramentas ─────────────────────
 
 function Toolbar({
@@ -1155,6 +1368,8 @@ function Toolbar({
   onToggleGamer,
   escMinimiza,
   onToggleEsc,
+  onDiagnostico,
+  diagAberto,
 }: {
   controller: Controller;
   state: State;
@@ -1175,16 +1390,37 @@ function Toolbar({
   onToggleGamer: () => void;
   escMinimiza: boolean;
   onToggleEsc: () => void;
+  onDiagnostico: () => void;
+  diagAberto: boolean;
 }): React.JSX.Element {
   const [menu, setMenu] = useState<'monitor' | 'teclas' | 'qualidade' | null>(null);
   const outgoing = state.outgoing!;
   const stats = outgoing.stats;
   const displays = outgoing.meta?.displays ?? [];
+  // Placa do PC controlado, mostrada ao lado da resolução (responde ao "está
+  // usando a GPU?"). O detalhe completo mora no painel de Diagnóstico.
+  const hostGpu = outgoing.meta?.hostGpu;
+  // Há um problema de desempenho concreto agora? Serve só para pintar o botão de
+  // Diagnóstico de vermelho, chamando atenção sem bloquear nada.
+  const diag = diagnosticarSessao(stats, outgoing.meta?.hostCapturaSoftware, outgoing.meta?.hostCapturaMotivo);
+  const temProblema = !!diag && !diag.ok;
+  // Mantém a barra aberta enquanto o mouse está sobre ela, mesmo que ela quebre
+  // em duas linhas: sem isto, descer para a segunda linha a fazia recolher.
+  const [sobreBarra, setSobreBarra] = useState(false);
+  // Estado do modo administrador do PC remoto, e o passo de confirmação (a troca
+  // derruba a sessão, então nunca é num clique só).
+  const hostElevado = outgoing.meta?.hostElevado === true;
+  const [confirmAdmin, setConfirmAdmin] = useState(false);
 
   const toggle = (name: typeof menu) => () => setMenu((atual) => (atual === name ? null : name));
 
   return (
-    <div className={`toolbar ${visible || menu ? '' : 'hidden'}`} onPointerDown={(e) => e.stopPropagation()}>
+    <div
+      className={`toolbar ${visible || menu || sobreBarra ? '' : 'hidden'}`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerEnter={() => setSobreBarra(true)}
+      onPointerLeave={() => setSobreBarra(false)}
+    >
       <span className="grip">
         <IconGrip />
       </span>
@@ -1400,6 +1636,57 @@ function Toolbar({
         {fullscreen ? <IconExitFullscreen /> : <IconFullscreen />}
       </button>
 
+      {/* Botão de Diagnóstico: abre o painel que diz se o vídeo está pela placa
+          (GPU) ou pelo processador, com o texto copiável. Fica vermelho quando há
+          um problema concreto, mas nunca bloqueia a tela. */}
+      <button
+        className={`tool ${diagAberto ? 'on' : ''} ${temProblema ? 'tool-alerta' : ''}`}
+        onClick={onDiagnostico}
+        title="Diagnóstico: mostra se o vídeo está usando a placa de vídeo (GPU) e o motivo de qualquer lentidão. O texto é selecionável e copiável."
+      >
+        <IconShield />
+        Diagnóstico
+        {temProblema && <span className="tool-ponto" />}
+      </button>
+
+      {/* Modo administrador do PC REMOTO: para instalar programas ou mexer em
+          janelas de admin lá. Trocar reabre o anfitrião (a sessão cai e volta) e,
+          enquanto elevado, a imagem fica lenta — por isso confirma antes. */}
+      {confirmAdmin ? (
+        <span className="modo-confirma-barra">
+          <span>
+            {hostElevado
+              ? 'Voltar ao modo rápido no PC remoto?'
+              : 'Entrar no admin? A imagem fica lenta e a sessão reabre.'}
+          </span>
+          <button
+            className="tool on"
+            onClick={() => {
+              setConfirmAdmin(false);
+              controller.trocarModoAdminRemoto(!hostElevado);
+            }}
+          >
+            Sim
+          </button>
+          <button className="tool" onClick={() => setConfirmAdmin(false)}>
+            Não
+          </button>
+        </span>
+      ) : (
+        <button
+          className={`tool ${hostElevado ? 'tool-alerta' : ''}`}
+          onClick={() => setConfirmAdmin(true)}
+          title={
+            hostElevado
+              ? 'O PC remoto está em MODO ADMINISTRADOR (imagem mais lenta). Clique para voltar ao modo rápido.'
+              : 'Coloca o PC remoto em modo administrador para instalar programas nele. A imagem fica lenta enquanto durar, e a sessão reabre — use e volte.'
+          }
+        >
+          <IconLock />
+          {hostElevado ? 'Sair do admin' : 'Modo admin'}
+        </button>
+      )}
+
       <span className="tool-sep" />
 
       <button
@@ -1417,6 +1704,23 @@ function Toolbar({
           <span>
             <b>{stats.width}×{stats.height}</b>
           </span>
+          {/* A PLACA DE VÍDEO em uso no PC controlado, ao lado da resolução — a
+              resposta direta a "está usando a GPU mesmo?". O nome e o selo HW/SW
+              vêm do próprio sistema do anfitrião (getGPUFeatureStatus), não de um
+              stat do WebRTC que neste Electron volta vazio. HW = a placa codifica
+              (rápido); SW vermelho = o processador codifica (a causa do atraso). */}
+          {hostGpu && (
+            <span
+              className="stat-gpu"
+              title={
+                hostGpu.encode
+                  ? `Placa de vídeo do PC controlado: ${hostGpu.nome}. Aceleração de vídeo por hardware ativa.`
+                  : `Placa de vídeo do PC controlado: ${hostGpu.nome}. O Chromium não reportou aceleração de vídeo por hardware neste PC (é só um indicador; nem sempre significa problema).`
+              }
+            >
+              {nomeCurtoGpu(hostGpu.nome)} · {hostGpu.encode ? 'HW' : 'SW'}
+            </span>
+          )}
           <span>
             <b>{stats.fps}</b> qps
           </span>
@@ -1431,7 +1735,21 @@ function Toolbar({
           <span>
             <b>{(stats.kbps / 1000).toFixed(1)}</b> Mb/s
           </span>
-          <span>{stats.transport}</span>
+          <span
+            className={stats.transport === 'retransmitido' ? 'stat-alerta' : undefined}
+            title={
+              stats.transport === 'retransmitido'
+                ? 'Conexão INDIRETA: o vídeo passa por um servidor no meio, o que adiciona atraso constante. Libere o app no firewall dos dois PCs para abrir o caminho direto.'
+                : 'Conexão direta entre os dois computadores.'
+            }
+          >
+            {stats.transport}
+          </span>
+          {stats.codec && (
+            <span title="Codec de vídeo. H264 costuma ser por hardware (rápido); VP8/VP9 costuma ser por software (mais pesado).">
+              {stats.codec}
+            </span>
+          )}
         </span>
       )}
 
@@ -1445,24 +1763,6 @@ function Toolbar({
             <strong>Reconectando…</strong> a conexão parou de responder e está sendo refeita. A sessão continua
             aberta — não é preciso fazer nada.
           </span>
-        </div>
-      )}
-
-      {state.confirmacaoQualidade && (
-        <div className="confirma-qualidade">
-          <div className="confirma-texto">
-            <strong>A qualidade alta está funcionando?</strong>
-            <span>
-              Se a imagem travou ou ficou atrasada, não clique em nada — em{' '}
-              <b>{state.confirmacaoQualidade.segundos}s</b> a qualidade anterior volta sozinha.
-            </span>
-          </div>
-          <button className="btn sm" onClick={() => controller.desfazerQualidade()}>
-            Desfazer agora
-          </button>
-          <button className="btn sm primary" onClick={() => controller.confirmarQualidade()}>
-            OK, manter
-          </button>
         </div>
       )}
 

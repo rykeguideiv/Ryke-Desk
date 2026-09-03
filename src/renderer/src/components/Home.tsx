@@ -771,6 +771,59 @@ function maskId(raw: string): string {
 
 // ───────────────────────────── rodapé ─────────────────────────────
 
+/**
+ * Liga/desliga o MODO ADMINISTRADOR.
+ *
+ * O app roda sem elevação de propósito — é o que mantém a captura de tela rápida
+ * (o Chromium não captura a tela quando elevado). Este botão sobe o app como
+ * administrador só quando é preciso instalar um programa ou mexer numa janela de
+ * admin no PC remoto — e SEM prompt de UAC (via a tarefa agendada), para
+ * funcionar mesmo controlando de longe. Enquanto no modo admin a imagem fica
+ * lenta; por isso é temporário. Trocar de modo reabre o app sozinho.
+ */
+function BotaoModoAdmin(): React.JSX.Element | null {
+  const [elevated, setElevated] = useState<boolean | null>(null);
+  const [confirmando, setConfirmando] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    void window.ryke.app.info().then((i) => { if (vivo) setElevated(i.elevated); }).catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+
+  if (elevated === null) return null;
+
+  const agir = (): void => {
+    if (elevated) void window.ryke.modo.normal();
+    else void window.ryke.modo.elevar();
+  };
+
+  if (confirmando) {
+    return (
+      <span className="modo-confirma">
+        <span>{elevated ? 'Voltar ao modo rápido?' : 'Entrar no admin? A imagem fica lenta.'} O app reabre sozinho.</span>
+        <button className="btn sm" onClick={agir}>Sim</button>
+        <button className="btn ghost sm" onClick={() => setConfirmando(false)}>Não</button>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      className={`btn ghost sm ${elevated ? 'modo-admin-ativo' : ''}`}
+      onClick={() => setConfirmando(true)}
+      title={
+        elevated
+          ? 'Você está em MODO ADMINISTRADOR (imagem mais lenta). Clique para voltar ao modo rápido.'
+          : 'Entrar no modo administrador para instalar programas no PC remoto. A imagem fica lenta enquanto durar; use e volte.'
+      }
+    >
+      <IconShield />
+      {elevated ? 'Sair do admin' : 'Modo admin'}
+    </button>
+  );
+}
+
 function Footer({ state, onOpenSettings }: { state: State; onOpenSettings: () => void }): React.JSX.Element {
   const rotulo =
     state.server.status === 'online'
@@ -790,6 +843,7 @@ function Footer({ state, onOpenSettings }: { state: State; onOpenSettings: () =>
       </div>
       <div className="footer-left">
         <span>versão {state.version}</span>
+        <BotaoModoAdmin />
         <button className="btn ghost sm" onClick={onOpenSettings}>
           <IconSettings />
           Ajustes

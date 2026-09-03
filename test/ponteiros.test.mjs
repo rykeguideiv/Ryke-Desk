@@ -5,6 +5,9 @@ import {
   nomeCurto,
   svgDaSeta,
   cursorCssDaSeta,
+  svgDoCursorSozinho,
+  hotspotDaSeta,
+  ehCursorPadrao,
 } from '../src/shared/ponteiros.ts';
 
 let falhas = 0;
@@ -60,6 +63,36 @@ check('o cursor não carrega aspas cruas que fechariam a url', !cursor.slice(5, 
 // pessoa perderia a cor que a identifica sem saber por quê.
 const larguraMaxima = Number(/width="(\d+)"/.exec(svgDaSeta(corDoPonteiro(0), 'x'.repeat(80)))[1]);
 check(`o desenho cabe no limite do Chromium (${larguraMaxima} px)`, larguraMaxima <= 128);
+
+// ── a FORMA do cursor remoto (texto, redimensionar, mãozinha…) ──
+//
+// A seta remota agora vira a forma do cursor de lá. Sem desenho próprio, uma
+// forma recai na seta comum — mas nunca deixa de produzir um SVG válido.
+check('a seta comum é o padrão', ehCursorPadrao('default') && ehCursorPadrao(undefined));
+check('uma forma de verdade não é a padrão', !ehCursorPadrao('text') && !ehCursorPadrao('ew-resize'));
+
+// Cada forma conhecida gera um desenho fechado e com a cor pedida.
+const cor = corDoPonteiro(0);
+for (const tipo of ['default', 'text', 'pointer', 'ew-resize', 'ns-resize', 'nesw-resize', 'nwse-resize', 'move', 'crosshair', 'not-allowed', 'wait', 'progress', 'help']) {
+  const desenho = svgDaSeta(cor, 'Ana', tipo);
+  const soForma = svgDoCursorSozinho(cor, tipo);
+  const h = hotspotDaSeta(tipo);
+  check(`forma '${tipo}': SVG com nome é único e fechado`, desenho.startsWith('<svg') && desenho.endsWith('</svg>'));
+  check(`forma '${tipo}': SVG só da forma é único e fechado`, soForma.startsWith('<svg') && soForma.endsWith('</svg>'));
+  check(`forma '${tipo}': hotspot válido dentro do desenho`,
+    Number.isFinite(h.x) && Number.isFinite(h.y) && h.x >= 0 && h.y >= 0 && h.x <= 24 && h.y <= 24);
+}
+
+// A viga de texto aponta pelo centro; a seta, pela ponta — hotspots diferentes.
+check('a viga de texto e a seta têm hotspots diferentes',
+  hotspotDaSeta('text').x !== hotspotDaSeta('default').x || hotspotDaSeta('text').y !== hotspotDaSeta('default').y);
+check('a seta comum aponta pela ponta (2,2)',
+  hotspotDaSeta('default').x === 2 && hotspotDaSeta('default').y === 2);
+
+// A forma de redimensionar precisa levar a cor do visitante, não uma fixa.
+const redimensionar = svgDaSeta(corDoPonteiro(1), 'Ana', 'ew-resize');
+check('a forma de redimensionar usa a cor do visitante', redimensionar.includes(corDoPonteiro(1).fill));
+check('e continua trazendo o nome embaixo', redimensionar.includes('>Ana<'));
 
 console.log(falhas === 0 ? '\nSetas dos visitantes validadas.\n' : `\n${falhas} falha(s).\n`);
 process.exit(falhas === 0 ? 0 : 1);

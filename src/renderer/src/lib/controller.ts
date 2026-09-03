@@ -32,6 +32,14 @@ export type HostMeta = {
   hostName: string;
   displays: { id: number; label: string; primary: boolean }[];
   activeDisplay: number;
+  /** Placa do anfitrião e se ele codifica por hardware (ver CtrlMeta.hostGpu). */
+  hostGpu?: { nome: string; encode: boolean; decode: boolean };
+  /** O anfitrião caiu na captura por software (lenta)? Ver CtrlMeta.hostCapturaSoftware. */
+  hostCapturaSoftware?: boolean;
+  /** Motivo técnico real dessa queda (ver CtrlMeta.hostCapturaMotivo). */
+  hostCapturaMotivo?: string;
+  /** O anfitrião está em modo administrador agora? Ver CtrlMeta.hostElevado. */
+  hostElevado?: boolean;
 };
 
 export type Outgoing = {
@@ -92,8 +100,6 @@ export type State = {
    * conectar naquele número sem uma decisão explícita do usuário.
    */
   identidadeSuspeita: { numero: string; esperada: string; recebida: string } | null;
-  /** Contagem regressiva da confirmação da qualidade alta. */
-  confirmacaoQualidade: { segundos: number } | null;
   machineName: string;
   version: string;
   server: { status: ServerStatus; detail?: string };
@@ -155,8 +161,6 @@ const KNOCK_TIMEOUT_MS = 25_000;
 const APROVACAO_TIMEOUT_MS = 75_000;
 /** Quanto tempo o pedido fica na tela do anfitrião antes de se recusar sozinho. */
 export const SEGUNDOS_PARA_APROVAR = 60;
-/** Prazo para confirmar a qualidade alta antes de ela se desfazer sozinha. */
-export const SEGUNDOS_PARA_CONFIRMAR_QUALIDADE = 20;
 
 const MOTIVOS: Record<string, string> = {
   'senha-incorreta': 'Senha incorreta.',
@@ -180,8 +184,6 @@ export class Controller {
   private corretores: string[] | null = null;
   private relays: string[] | null = null;
   private relogioDiagnostico: number | null = null;
-  private relogioQualidade: number | null = null;
-  private qualidadeAnterior: Quality = 'auto';
   /**
    * Sessões em que este computador é o anfitrião — uma por visitante.
    *
@@ -237,7 +239,6 @@ export class Controller {
     myId: null,
     minhaImpressao: null,
     identidadeSuspeita: null,
-    confirmacaoQualidade: null,
     machineName: 'PC',
     version: '',
     server: { status: 'conectando' },
@@ -383,7 +384,7 @@ export class Controller {
       // permite a cada um deles desenhar a seta desta máquina no lugar certo,
       // em vez de depender da seta que vem atrasada dentro do vídeo.
       window.ryke.session.onCursor((ponto) => {
-        for (const sessao of this.hostSessions.values()) sessao.sendCursor(ponto.x, ponto.y);
+        for (const sessao of this.hostSessions.values()) sessao.sendCursor(ponto.x, ponto.y, ponto.tipo);
       }),
       // E as setas dos visitantes vão para todos os visitantes, MENOS para o
       // dono de cada uma. A própria seta cada um desenha com o cursor do
@@ -397,6 +398,11 @@ export class Controller {
       }),
       window.ryke.ponteiros.onEstado((lista) => {
         for (const [peerId, sessao] of this.hostSessions) {
+          // A forma da PRÓPRIA seta vai à parte: cada visitante troca a forma do
+          // cursor do sistema dele, que é nítido e sem atraso. A da seta ele não
+          // recebe de volta na lista (empilharia duas), só a forma.
+          const propria = lista.find((ponteiro) => ponteiro.id === peerId);
+          if (propria) sessao.sendCursorForma(propria.tipo ?? 'default');
           sessao.sendPonteiros(lista.filter((ponteiro) => ponteiro.id !== peerId));
         }
       }),
@@ -626,7 +632,6 @@ export class Controller {
 
   dispose(): void {
     if (this.relogioDiagnostico !== null) clearInterval(this.relogioDiagnostico);
-    if (this.relogioQualidade !== null) clearInterval(this.relogioQualidade);
     for (const fn of this.cleanup) fn();
     this.cleanup = [];
     for (const sessao of this.hostSessions.values()) sessao.close('aplicativo encerrado');
@@ -1214,51 +1219,16 @@ export class Controller {
   /**
    * Troca a qualidade da imagem.
    *
-   * "Alta" recebe um tratamento diferente das demais, e por um motivo
-   * concreto: ela é a única que pode piorar a sessão em vez de melhorar. Numa
-   * rede que não sustenta, ela enche a fila do caminho, a imagem passa a
-   * chegar segundos atrasada — e aí o usuário não consegue nem clicar para
-   * desfazer, porque cada clique também demora a chegar.
-   *
-   * A saída é a mesma que o Windows usa ao trocar a resolução do monitor:
-   * aplica, pergunta, e desfaz sozinho se ninguém confirmar. Quem ficou preso
-   * numa imagem inutilizável só precisa esperar — o programa volta atrás.
+   * Escolha manual é ordem: a qualidade fica exatamente na que foi pedida e só
+   * muda sozinha quando o preset é 'auto' (aí quem manda é o adaptador de rede,
+   * no anfitrião). "Alta" não tem mais tratamento especial nem confirmação de
+   * 20 segundos — clicou, ficou. Se a rede não sustentar, a saída é a pessoa
+   * trocar para 'auto' ou 'média', não o programa reverter sozinho por baixo
+   * dos panos, que era justamente o que dava a impressão de "a qualidade caiu
+   * do nada".
    */
   setQuality(quality: Quality): void {
-    this.cancelarConfirmacaoDeQualidade();
-
-    const anterior = this.state.outgoing?.quality ?? 'auto';
     this.aplicarQualidade(quality);
-
-    if (quality !== 'alta' || anterior === 'alta') return;
-
-    this.qualidadeAnterior = anterior;
-    this.set({ confirmacaoQualidade: { segundos: SEGUNDOS_PARA_CONFIRMAR_QUALIDADE } });
-    this.relogioQualidade = window.setInterval(() => {
-      const restante = (this.state.confirmacaoQualidade?.segundos ?? 0) - 1;
-      if (restante > 0) {
-        this.set({ confirmacaoQualidade: { segundos: restante } });
-        return;
-      }
-      // Ninguém confirmou. Ou a pessoa se distraiu, ou — o caso que importa —
-      // a sessão ficou lenta demais para ela conseguir responder.
-      this.cancelarConfirmacaoDeQualidade();
-      this.aplicarQualidade(this.qualidadeAnterior);
-      this.toast('info', 'Qualidade alta desfeita automaticamente: ninguém confirmou em 20 segundos.');
-    }, 1000);
-  }
-
-  /** O usuário clicou em OK: a qualidade alta fica. */
-  confirmarQualidade(): void {
-    this.cancelarConfirmacaoDeQualidade();
-    void this.updateSettings({ quality: 'alta' });
-    this.toast('ok', 'Qualidade alta mantida.');
-  }
-
-  /** O usuário desistiu antes do prazo. */
-  desfazerQualidade(): void {
-    this.cancelarConfirmacaoDeQualidade();
-    this.aplicarQualidade(this.qualidadeAnterior);
   }
 
   /**
@@ -1273,17 +1243,9 @@ export class Controller {
     if (!alvo) return;
     this.patchAba(alvo, { quality });
     void this.viewerSessions.get(alvo)?.applyQuality(quality);
-    // A preferência de "alta" só é gravada depois de confirmada: seria ruim
-    // reabrir o programa já preso numa qualidade que nem chegou a funcionar.
-    if (quality !== 'alta') void this.updateSettings({ quality });
-  }
-
-  private cancelarConfirmacaoDeQualidade(): void {
-    if (this.relogioQualidade !== null) {
-      clearInterval(this.relogioQualidade);
-      this.relogioQualidade = null;
-    }
-    if (this.state.confirmacaoQualidade) this.set({ confirmacaoQualidade: null });
+    // Grava a preferência para reabrir na mesma qualidade — inclusive "alta",
+    // agora que ela não se desfaz mais sozinha.
+    void this.updateSettings({ quality });
   }
 
   selectDisplay(id: number): void {
@@ -1292,6 +1254,26 @@ export class Controller {
 
   runRemoteInstaller(): void {
     this.viewer?.runInstaller();
+  }
+
+  /**
+   * Liga/desliga o MODO ADMINISTRADOR no computador remoto.
+   *
+   * Reabre o anfitrião elevado (para instalar programas / mexer em janelas de
+   * admin) ou de volta ao normal. Reabre o processo do outro lado: a sessão cai
+   * e reconecta. E, elevado, a captura de tela não funciona por hardware, então
+   * a imagem fica lenta — é um modo temporário, para a tarefa e volta.
+   */
+  trocarModoAdminRemoto(ligar: boolean): void {
+    const sessao = this.viewer;
+    if (!sessao) return;
+    sessao.enviarModoAdmin(ligar);
+    this.toast(
+      'ok',
+      ligar
+        ? 'Entrando em modo administrador no PC remoto… a conexão vai cair e reabrir. Reconecte em alguns segundos.'
+        : 'Voltando ao modo normal no PC remoto… a conexão vai cair e reabrir. Reconecte em alguns segundos.',
+    );
   }
 
   toggleBlockLocalInput(): void {

@@ -11,7 +11,9 @@ import { Adaptador } from '../../../shared/adaptacao';
 import { Vigilancia } from '../../../shared/vigilancia';
 import type { Signaling } from './signaling';
 import type { Quality } from '../../../shared/config';
+import type { TipoCursor } from '../../../shared/protocol';
 import { maiorQualidade, PERFIS_CAPTURA_SOFTWARE } from '../../../shared/qualidade-captura';
+import { PERFIS_QUALIDADE, ALTURA_MAX_AUTO, escalaParaAltura } from '../../../shared/qualidade-video';
 import type { Ponteiro } from '../../../shared/ponteiros';
 
 /**
@@ -45,6 +47,23 @@ export type LiveStats = {
   atraso: number;
   /** O que o ajuste automático está fazendo agora, em português. */
   ajuste: string;
+  /**
+   * O codec de vídeo em uso — H264, VP9, VP8, AV1. É o número que diz, num
+   * relance, se a imagem está sendo codificada por hardware (H264 na esmagadora
+   * maioria das GPUs) ou arrastando o processador em software. Fica na barra de
+   * status justamente para diagnosticar lentidão sem adivinhação.
+   */
+  codec: string;
+  /**
+   * A imagem está sendo codificada por HARDWARE ou por SOFTWARE?
+   *
+   * É o número que decide a briga contra o atraso. Codificar a tela por software
+   * é o que faz "digito e só aparece dois segundos depois"; por hardware, o
+   * atraso some. Vem do `encoderImplementation`/`decoderImplementation` do
+   * WebRTC — nomes como "MediaFoundation…"/"…Accelerator" são hardware; "libvpx",
+   * "OpenH264" são software.
+   */
+  aceleracao: 'hardware' | 'software' | '';
 };
 
 export type SessionEvents = {
@@ -58,7 +77,15 @@ export type SessionEvents = {
    * Chega uma vintena de vezes por segundo, e por isso não vira estado do
    * React: quem escuta move um elemento pelo estilo, sem redesenhar a árvore.
    */
-  cursor: (ponto: { x: number; y: number }) => void;
+  cursor: (ponto: { x: number; y: number; tipo?: TipoCursor }) => void;
+  /**
+   * "A SUA seta agora tem esta forma."
+   *
+   * Só no visitante: o anfitrião conta que forma o cursor assumiria onde a seta
+   * deste visitante está, e a interface troca a forma do próprio cursor do
+   * sistema — sem perder a cor que identifica cada um.
+   */
+  formaPropria: (tipo: TipoCursor) => void;
   /**
    * "A sua seta é esta cor, e este é o nome que vai escrito embaixo dela."
    *
@@ -100,27 +127,21 @@ export type SessionEvents = {
  */
 const PULSO_MS = 3000;
 
-const QUALITY_PROFILES: Record<
-  Quality,
-  { maxBitrate: number; scale: number; framerate?: number; hint: 'detail' | 'motion'; degradation: RTCDegradationPreference }
-> = {
-  /**
-   * Tudo o que a máquina e a rede derem. Sem freio de propósito — é a opção
-   * de quem tem rede sobrando e quer a melhor imagem possível.
-   *
-   * É também a única que pode piorar a experiência em vez de melhorar: numa
-   * rede que não sustenta, ela enche a fila e a sessão fica lenta a ponto de
-   * o usuário não conseguir nem voltar atrás. Por isso a interface pede
-   * confirmação e desfaz sozinha em 20 segundos (ver `controller.ts`).
-   */
-  alta: { maxBitrate: 24_000_000, scale: 1, framerate: 60, hint: 'detail', degradation: 'maintain-resolution' },
-  // Meio-termo fixo: bom para a maioria das redes, sem o programa mexer.
-  media: { maxBitrate: 4_000_000, scale: 1, framerate: 30, hint: 'detail', degradation: 'balanced' },
-  // Internet fraca ou instável: pouca banda, movimento fluido, imagem menor.
-  baixa: { maxBitrate: 1_000_000, scale: 1.5, framerate: 20, hint: 'motion', degradation: 'maintain-framerate' },
-  // O padrão. A taxa aqui vale só até a primeira medida do adaptador chegar.
-  auto: { maxBitrate: 8_000_000, scale: 1, hint: 'detail', degradation: 'balanced' },
-};
+/**
+ * Traduz o nome do codificador/decodificador do WebRTC em "hardware" ou
+ * "software".
+ *
+ * O WebRTC não expõe um sinalzinho limpo; expõe o NOME da implementação, e é
+ * pelo nome que se sabe. "MediaFoundation…", "…Accelerator", "NvEnc", "D3D",
+ * "Vaapi", "QuickSync", "ExternalEncoder/Decoder" são caminhos de hardware.
+ * "libvpx", "OpenH264", "ffmpeg", "dav1d" são software. Na dúvida, devolve ''.
+ */
+function classificarAceleracao(impl: string): 'hardware' | 'software' | '' {
+  const s = impl.toLowerCase();
+  if (/mediafoundation|accelerat|nvenc|nvdec|d3d|vaapi|quicksync|external|hardware|vda|vea/.test(s)) return 'hardware';
+  if (/libvpx|openh264|ffmpeg|dav1d|software|fallbackfromsw|internal/.test(s)) return 'software';
+  return '';
+}
 
 export class Session {
   readonly role: Role;
@@ -138,6 +159,8 @@ export class Session {
   private statsTimer: number | null = null;
   private lastBytes = 0;
   private lastStatsAt = 0;
+  /** Última vez que despejei um resumo da sessão no arquivo de diagnóstico. */
+  private ultimoDiag = 0;
   private unsubscribers: (() => void)[] = [];
   private disposed = false;
   private quality: Quality = 'auto';
@@ -177,8 +200,8 @@ export class Session {
   remoteStream: MediaStream | null = null;
 
   private listeners: { [K in keyof SessionEvents]: SessionEvents[K][] } = {
-    stream: [], stats: [], meta: [], cursor: [], cor: [], ponteiros: [], installer: [], sas: [], transfers: [],
-    closed: [], ready: [], saude: [],
+    stream: [], stats: [], meta: [], cursor: [], formaPropria: [], cor: [], ponteiros: [], installer: [], sas: [],
+    transfers: [], closed: [], ready: [], saude: [],
   };
 
   constructor(role: Role, peerId: string, signaling: Signaling, iceServers: RTCIceServer[]) {
@@ -259,13 +282,65 @@ export class Session {
     };
     const stream = await pegarTela(this.consumidorTela);
     this.localStream = stream;
+    // Aterrissa no arquivo de diagnóstico a informação que decide tudo: a
+    // captura pegou o caminho rápido do Windows ou caiu na rota lenta? E, se
+    // caiu, POR QUÊ? É o que eu leio do disco depois, sem depender de reproduzir.
+    const trilha = stream.getVideoTracks()[0];
+    const cfg = trilha?.getSettings();
+    const rota = capturaEstaPorSoftware() ? 'SOFTWARE (rota lenta)' : 'hardware (getDisplayMedia)';
+    window.ryke.diag.log(
+      `[host] captura=${rota} qualidade=${quality} fonte=${cfg?.width ?? '?'}x${cfg?.height ?? '?'}@${Math.round(cfg?.frameRate ?? 0)}` +
+        (capturaEstaPorSoftware() ? ` | motivo: ${motivoDaCapturaSoftware()}` : ''),
+    );
     for (const track of stream.getTracks()) this.pc.addTrack(track, stream);
+    this.preferirCodec();
 
     this.attachChannel(this.pc.createDataChannel(CTRL_CHANNEL, { ordered: true }));
     this.attachChannel(this.pc.createDataChannel(FILE_CHANNEL, { ordered: true }));
     // Sem ordem e sem retransmissão: posição de ponteiro velha não interessa a
     // ninguém, e esperar por ela era o que fazia o mouse andar aos solavancos.
     this.attachChannel(this.pc.createDataChannel(INPUT_CHANNEL, { ordered: false, maxRetransmits: 0 }));
+  }
+
+  /**
+   * Faz o codificador preferir H.264.
+   *
+   * É a mudança que mais aproxima o Ryke Desk de um AnyDesk em ATRASO e em
+   * imagem por bit. O padrão do Chromium para tela costuma ser VP8/VP9 em
+   * SOFTWARE — e software encodando a tela é justamente o que enche a fila de
+   * codificação e faz o "digito e só aparece dois segundos depois". O H.264 é
+   * aceito por praticamente toda GPU de Windows para codificar POR HARDWARE:
+   * sai do caminho do processador, o atraso despenca e a nitidez sobe.
+   *
+   * `setCodecPreferences` só REORDENA o que já foi oferecido, então é seguro: se
+   * não houver H.264 numa máquina, ela simplesmente continua no próximo da fila
+   * (VP9, VP8), sem quebrar a negociação. Mantemos a lista inteira — inclusive
+   * rtx/red/ulpfec — só empurrando o H.264 para a frente.
+   */
+  private preferirCodec(): void {
+    try {
+      const cap = RTCRtpSender.getCapabilities('video');
+      if (!cap?.codecs) return;
+      const posicao = (mime: string): number => {
+        switch (mime.toLowerCase()) {
+          case 'video/h264':
+            return 0;
+          case 'video/vp9':
+            return 1;
+          case 'video/vp8':
+            return 2;
+          case 'video/av1':
+            return 3;
+          default:
+            return 4; // rtx/red/ulpfec ficam depois dos codecs de vídeo reais
+        }
+      };
+      const ordenados = [...cap.codecs].sort((a, b) => posicao(a.mimeType) - posicao(b.mimeType));
+      const transceptor = this.pc.getTransceivers().find((t) => t.sender.track?.kind === 'video');
+      transceptor?.setCodecPreferences(ordenados);
+    } catch {
+      /* navegador sem setCodecPreferences: segue no padrão, sem prejuízo */
+    }
   }
 
   /** Envia a oferta somente depois que o visitante recebeu `accepted`. */
@@ -448,7 +523,8 @@ export class Session {
 
     if (this.role === 'visitante') {
       if (msg.t === 'meta') this.emit('meta', msg);
-      if (msg.t === 'cursor') this.emit('cursor', { x: msg.x, y: msg.y });
+      if (msg.t === 'cursor') this.emit('cursor', { x: msg.x, y: msg.y, tipo: msg.tipo });
+      if (msg.t === 'cursor-forma') this.emit('formaPropria', msg.tipo);
       if (msg.t === 'cor') this.emit('cor', { indice: msg.indice, nome: msg.nome });
       if (msg.t === 'ponteiros') this.emit('ponteiros', msg.lista);
       if (msg.t === 'sas-result') this.emit('sas', { ok: msg.ok, motivo: msg.motivo });
@@ -517,15 +593,28 @@ export class Session {
       case 'block-input':
         await window.ryke.input.blockLocal(msg.on);
         break;
+      case 'admin':
+        // O visitante mandou o anfitrião trocar de modo. Reabre o processo do
+        // anfitrião elevado (sem UAC, via tarefa) ou normal. A sessão cai; o
+        // visitante reconecta. Ver CtrlAdmin no protocolo para o porquê.
+        if (msg.ligar) await window.ryke.modo.elevar();
+        else await window.ryke.modo.normal();
+        break;
     }
+  }
+
+  /** Visitante: pede ao anfitrião para entrar/sair do modo administrador. */
+  enviarModoAdmin(ligar: boolean): void {
+    this.sendCtrl({ t: 'admin', ligar });
   }
 
   /** Anfitrião: informa ao visitante a geometria e a lista de monitores. */
   private async publishMeta(): Promise<void> {
-    const [active, displays, info] = await Promise.all([
+    const [active, displays, info, gpu] = await Promise.all([
       window.ryke.screen.active(),
       window.ryke.screen.list(),
       window.ryke.app.info(),
+      window.ryke.gpu.status().catch(() => null),
     ]);
     this.sendCtrl({
       t: 'meta',
@@ -535,6 +624,10 @@ export class Session {
       hostName: info.machineName,
       displays: displays.map((d) => ({ id: d.id, label: d.label, primary: d.primary })),
       activeDisplay: active.id,
+      hostGpu: gpu ? { nome: gpu.nome, encode: gpu.encode, decode: gpu.decode } : undefined,
+      hostCapturaSoftware: capturaEstaPorSoftware(),
+      hostCapturaMotivo: motivoDaCapturaSoftware() || undefined,
+      hostElevado: info.elevated,
     });
   }
 
@@ -583,7 +676,7 @@ export class Session {
         /* fonte que não aceita reconfiguração continua na taxa em que nasceu */
       });
 
-    const profile = QUALITY_PROFILES[preset];
+    const profile = PERFIS_QUALIDADE[preset];
     // contentHint diz ao codificador se ele deve preservar nitidez de texto
     // ou suavidade de movimento — muda bastante o resultado em tela cheia.
     sender.track.contentHint = profile.hint;
@@ -592,18 +685,26 @@ export class Session {
     if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
     params.degradationPreference = profile.degradation;
 
+    // A ESCALA AGORA MIRA UMA ALTURA, NÃO UM FATOR FIXO. É o conserto do
+    // "baixar a qualidade não adianta": numa tela grande, encolher para 720p /
+    // 1080p corta de verdade a área que o codificador comprime — menos
+    // processador, fila mais curta, menos atraso — em vez de só apertar a banda
+    // e borrar a imagem à toa. Lê a resolução VIVA da captura a cada chamada.
+    const escala = escalaParaAltura(this.alturaDaFonte(), profile.alturaAlvo);
+
     if (preset === 'auto') {
       // Em 'auto' quem manda na taxa é o adaptador, que mede a rede a cada
       // dois segundos. Fixar um número aqui seria disputar o volante com ele:
-      // este valor vale só até a primeira medida chegar.
+      // este valor vale só até a primeira medida chegar. A altura já começa no
+      // teto do automático; o adaptador só desce a partir daí.
       this.ultimoAjuste = 0;
       params.encodings[0].maxBitrate = profile.maxBitrate;
-      params.encodings[0].scaleResolutionDownBy = 1;
+      params.encodings[0].scaleResolutionDownBy = escala;
       delete params.encodings[0].maxFramerate;
     } else {
       // Escolha manual é ordem, não sugestão: fica exatamente como foi pedida.
       params.encodings[0].maxBitrate = profile.maxBitrate;
-      params.encodings[0].scaleResolutionDownBy = profile.scale;
+      params.encodings[0].scaleResolutionDownBy = escala;
       if (profile.framerate) params.encodings[0].maxFramerate = profile.framerate;
       else delete params.encodings[0].maxFramerate;
     }
@@ -612,6 +713,19 @@ export class Session {
 
   get currentQuality(): Quality {
     return this.quality;
+  }
+
+  /**
+   * Altura, em linhas, da tela que está sendo capturada agora.
+   *
+   * É a resolução real da fonte, lida da própria trilha de vídeo — é sobre ela
+   * que o fator de escala mira uma altura-alvo. Sem trilha viva ainda, assume
+   * 1080p: um palpite seguro que a primeira volta do ajuste já corrige.
+   */
+  private alturaDaFonte(): number {
+    const sender = this.pc.getSenders().find((s) => s.track?.kind === 'video');
+    const altura = sender?.track?.getSettings().height;
+    return typeof altura === 'number' && altura > 0 ? altura : 1080;
   }
 
   /**
@@ -679,14 +793,20 @@ export class Session {
     return decisao.motivo;
   }
 
-  private async aplicarEncoding(maxBitrate: number, maxFramerate: number, escala: number): Promise<void> {
+  private async aplicarEncoding(maxBitrate: number, maxFramerate: number, escalaAdaptador: number): Promise<void> {
     const sender = this.pc.getSenders().find((s) => s.track?.kind === 'video');
     if (!sender) return;
     const params = sender.getParameters();
     if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
     params.encodings[0].maxBitrate = maxBitrate;
     params.encodings[0].maxFramerate = maxFramerate;
-    params.encodings[0].scaleResolutionDownBy = escala;
+    // Dois motivos para encolher, e fica o MAIOR dos dois: o adaptador encolhe
+    // por falta de BANDA; o teto de altura encolhe por CUSTO de codificação.
+    // Assim o automático nunca codifica acima de 1440p (mesmo numa fibra que
+    // aguentaria 4K, porque 4K aqui só rende atraso), e desce mais quando a
+    // rede pedir.
+    const escalaTeto = escalaParaAltura(this.alturaDaFonte(), ALTURA_MAX_AUTO);
+    params.encodings[0].scaleResolutionDownBy = Math.max(escalaAdaptador, escalaTeto);
     await sender.setParameters(params).catch(() => {});
   }
 
@@ -698,9 +818,18 @@ export class Session {
   sendMouseMove(x: number, y: number): void {
     this.sendRapido({ t: 'mm', x, y });
   }
-  /** Anfitrião: conta ao visitante onde o cursor daqui está de verdade. */
-  sendCursor(x: number, y: number): void {
-    this.sendRapido({ t: 'cursor', x, y });
+  /** Anfitrião: conta ao visitante onde o cursor daqui está — e que forma tem. */
+  sendCursor(x: number, y: number, tipo?: TipoCursor): void {
+    this.sendRapido({ t: 'cursor', x, y, tipo });
+  }
+  /**
+   * Anfitrião: "a SUA seta, agora, tem esta forma."
+   *
+   * Confiável: uma troca de forma perdida deixaria o visitante com a viga de
+   * texto (ou a mãozinha) presa depois de já ter saído de cima do campo.
+   */
+  sendCursorForma(tipo: TipoCursor): void {
+    this.sendCtrl({ t: 'cursor-forma', tipo });
   }
   /**
    * Anfitrião: "você é o visitante de número N; a sua seta é esta cor".
@@ -906,7 +1035,7 @@ export class Session {
     }
 
     const stats: LiveStats = {
-      rtt: 0, fps: 0, kbps: 0, width: 0, height: 0, transport: '—', atraso: 0, ajuste: '',
+      rtt: 0, fps: 0, kbps: 0, width: 0, height: 0, transport: '—', atraso: 0, ajuste: '', codec: '', aceleracao: '',
     };
     const now = performance.now();
 
@@ -917,9 +1046,19 @@ export class Session {
     let perdidos = 0;
     let totalPacotes = 0;
     let limitacao: 'none' | 'bandwidth' | 'cpu' | 'other' = 'none';
+    // Para resolver o codec: guardamos o id do codec do vídeo e o mapa id→nome,
+    // porque as duas informações vêm em entradas separadas do getStats.
+    let codecId = '';
+    const nomesCodec = new Map<string, string>();
 
     report.forEach((entry) => {
+      if (entry.type === 'codec' && typeof entry.mimeType === 'string') {
+        // "video/H264" → "H264".
+        nomesCodec.set(entry.id, entry.mimeType.replace(/^video\//i, ''));
+      }
       if (entry.type === 'inbound-rtp' && entry.kind === 'video') {
+        if (typeof entry.codecId === 'string') codecId = entry.codecId;
+        if (typeof entry.decoderImplementation === 'string') stats.aceleracao = classificarAceleracao(entry.decoderImplementation);
         quadrosDeVideo = entry.framesDecoded ?? 0;
         stats.fps = Math.round(entry.framesPerSecond ?? 0);
         stats.width = entry.frameWidth ?? 0;
@@ -942,6 +1081,8 @@ export class Session {
         this.ultEspera = { soma: somaEspera, quadros };
       }
       if (entry.type === 'outbound-rtp' && entry.kind === 'video') {
+        if (typeof entry.codecId === 'string') codecId = entry.codecId;
+        if (typeof entry.encoderImplementation === 'string') stats.aceleracao = classificarAceleracao(entry.encoderImplementation);
         quadrosDeVideo = entry.framesSent ?? 0;
         stats.fps = Math.round(entry.framesPerSecond ?? 0);
         stats.width = entry.frameWidth ?? 0;
@@ -970,6 +1111,7 @@ export class Session {
     });
 
     if (stats.transport === '—' && stats.rtt >= 0) stats.transport = 'direto';
+    stats.codec = nomesCodec.get(codecId) ?? '';
 
     // Imagem parada com a conexão jurando estar viva é o retrato exato do
     // congelamento relatado. Quem decide o que fazer é a vigilância.
@@ -980,11 +1122,27 @@ export class Session {
       // O buffer de reprodução é o maior responsável pelo atraso percebido.
       // Zero seria ideal e é arriscado: numa rede trepidante, quadro que
       // chega fora de hora vira engasgo. Então o alvo acompanha a trepidação
-      // medida — quase nada em rede boa, um respiro em rede ruim.
-      this.ajustarBufferDeReproducao(Math.min(0.2, jitterSegundos * 2.5));
+      // medida — quase nada em rede boa, um respiro em rede ruim. O teto caiu
+      // para 120 ms (era 200): numa área de trabalho remota, responder rápido
+      // vale mais do que suavizar o último solavanco.
+      this.ajustarBufferDeReproducao(Math.min(0.12, jitterSegundos * 2));
     }
 
     if (this.role === 'anfitriao') stats.ajuste = this.ajustarQualidade(banca, stats.rtt, perdidos, totalPacotes, limitacao);
+
+    // Um resumo a cada ~5 s no arquivo de diagnóstico. No visitante é onde se
+    // vê o essencial: caminho DIRETO ou retransmitido, atraso do buffer, codec,
+    // e se o DECODE está por hardware. É a foto que, lida do disco depois,
+    // aponta a causa da lentidão sem eu precisar reproduzir.
+    if (now - this.ultimoDiag > 5000) {
+      this.ultimoDiag = now;
+      window.ryke.diag.log(
+        `[${this.role === 'visitante' ? 'visitante' : 'host'}] ` +
+          `transporte=${stats.transport} rtt=${stats.rtt}ms atrasoImg=${stats.atraso}ms ` +
+          `fps=${stats.fps} mbps=${(stats.kbps / 1000).toFixed(1)} res=${stats.width}x${stats.height} ` +
+          `codec=${stats.codec || '?'} aceleracao=${stats.aceleracao || '?'}`,
+      );
+    }
 
     this.lastStatsAt = now;
     this.emit('stats', stats);
@@ -1031,6 +1189,23 @@ export class Session {
 }
 
 /**
+ * A captura em vigor está na rota reserva por SOFTWARE (canvas + JPEG por
+ * quadro)? Essa rota é muito mais lenta e é a causa provável de atraso num PC
+ * onde o `getDisplayMedia` não sobe (driver de vídeo genérico depois de formatar
+ * o Windows é o motivo campeão). O anfitrião manda este sinal no meta para o
+ * visitante poder apontar a causa em vez de a gente adivinhar.
+ */
+let capturaPorSoftwareAtiva = false;
+let motivoCapturaSoftware = '';
+export function capturaEstaPorSoftware(): boolean {
+  return capturaPorSoftwareAtiva;
+}
+/** Motivos técnicos reais que fizeram a captura cair na rota lenta (vazio se está no caminho rápido). */
+export function motivoDaCapturaSoftware(): string {
+  return capturaPorSoftwareAtiva ? motivoCapturaSoftware : '';
+}
+
+/**
  * Pede a tela ao processo principal. O seletor do Windows nunca aparece: o
  * monitor já foi decidido por quem está do outro lado.
  */
@@ -1047,25 +1222,33 @@ async function captureScreen(): Promise<MediaStream> {
   // Agora a fonte acompanha o que foi pedido: 60 em Alta, 30 nas demais, que é
   // onde 60 só gastaria processador do anfitrião sem ninguém notar.
   const alvo = quadrosDaCaptura();
-  const video: MediaTrackConstraints = { frameRate: { ideal: alvo, max: alvo } };
+  // Duas formas de pedir a tela, da mais específica para a mais compatível. Se o
+  // driver recusa a EXIGÊNCIA de uma taxa de quadros (alguns recusam `max:60`), a
+  // segunda tentativa — sem restrição nenhuma — quase sempre passa. É o que evita
+  // cair na rota lenta por causa de uma restrição que o Windows daquela máquina
+  // não aceitou, em vez de por incapacidade real de capturar.
+  const pedidosVideo: (MediaTrackConstraints | true)[] = [{ frameRate: { ideal: alvo, max: alvo } }, true];
   const erros: string[] = [];
 
   // Drivers de vídeo e o serviço de captura do Windows podem ainda estar
   // acordando quando a pessoa clica em Permitir. Repetimos as duas APIs em
   // vez de encerrar toda a sessão por uma falha transitória de milissegundos.
-  for (const pausa of [0, 250, 750]) {
+  for (const pausa of [0, 250, 750, 1500]) {
     if (pausa > 0) await esperar(pausa);
 
-    try {
-      // Vídeo primeiro: áudio em loopback não existe em vários drivers e não
-      // pode impedir o acesso remoto, cuja parte essencial é a tela.
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video, audio: false });
-      if (!stream.getVideoTracks().some((track) => track.readyState === 'live')) {
-        throw new Error('o Windows devolveu a fonte sem uma trilha de vídeo ativa');
+    for (const video of pedidosVideo) {
+      try {
+        // Vídeo primeiro: áudio em loopback não existe em vários drivers e não
+        // pode impedir o acesso remoto, cuja parte essencial é a tela.
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video, audio: false });
+        if (!stream.getVideoTracks().some((track) => track.readyState === 'live')) {
+          throw new Error('o Windows devolveu a fonte sem uma trilha de vídeo ativa');
+        }
+        capturaPorSoftwareAtiva = false; // caminho rápido (captura nativa do Windows)
+        return stream;
+      } catch (err) {
+        erros.push(`tela ${pausa}ms ${video === true ? 'simples' : 'fps'}: ${mensagemDeErro(err)}`);
       }
-      return stream;
-    } catch (err) {
-      erros.push(`tela ${pausa}ms: ${mensagemDeErro(err)}`);
     }
 
     // Compatibilidade para GPUs/sessões em que getDisplayMedia não inicia o
@@ -1084,6 +1267,7 @@ async function captureScreen(): Promise<MediaStream> {
       if (!stream.getVideoTracks().some((track) => track.readyState === 'live')) {
         throw new Error('a fonte compatível não possui vídeo ativo');
       }
+      capturaPorSoftwareAtiva = false; // ainda é captura nativa (desktopCapturer), não a rota lenta
       return stream;
     } catch (err) {
       erros.push(`compatibilidade ${pausa}ms: ${mensagemDeErro(err)}`);
@@ -1095,8 +1279,21 @@ async function captureScreen(): Promise<MediaStream> {
   // canvas alimentado por JPEGs do processo principal. É uma rota de
   // compatibilidade mais leve em quadros, porém mantém o acesso plenamente
   // utilizável e independe das duas APIs que falharam acima.
+  //
+  // ATENÇÃO ao diagnosticar lentidão: esta rota é MUITO mais lenta que a
+  // captura por hardware (uma foto inteira da tela por quadro). Se o programa
+  // caiu aqui, é a causa provável do atraso — e o aviso abaixo é o que permite
+  // descobrir isso sem adivinhação. getDisplayMedia falhar num Windows normal
+  // costuma ser driver de vídeo desatualizado ou o serviço de captura parado.
+  console.warn(
+    '[captura] getDisplayMedia NÃO funcionou; caindo na rota reserva por SOFTWARE (lenta). ' +
+      'Isto costuma ser a causa de lentidão. Motivos: ' + erros.join(' | '),
+  );
   try {
-    return await captureScreenByFrames();
+    const stream = await captureScreenByFrames();
+    capturaPorSoftwareAtiva = true; // rota reserva por SOFTWARE — a lenta
+    motivoCapturaSoftware = erros.join(' | '); // por que os caminhos rápidos falharam
+    return stream;
   } catch (err) {
     erros.push(`captura por software: ${mensagemDeErro(err)}`);
   }

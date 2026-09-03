@@ -15,6 +15,7 @@
 import koffi from 'koffi';
 import { mudarBotao, type BotaoMouse } from '../shared/botoes';
 import { lookupScan, VIRTUAL_KEYS, MODIFIER_CODES } from '../shared/keymap';
+import type { TipoCursor } from '../shared/protocol';
 
 // ── tipos Win32 ───────────────────────────────────────────────────
 const MOUSEINPUT = koffi.struct('MOUSEINPUT', {
@@ -58,6 +59,125 @@ const GetSystemMetrics = user32.func('int __stdcall GetSystemMetrics(int nIndex)
 // assinatura abaixo; a constante em si não é usada em lugar nenhum.
 koffi.struct('POINT', { x: 'long', y: 'long' });
 const GetCursorPos = user32.func('int __stdcall GetCursorPos(_Out_ POINT *p)');
+
+// ── forma do cursor (GetCursorInfo) ───────────────────────────────
+//
+// É o que permite ao ponteiro do acesso remoto virar viga de texto, seta de
+// redimensionar ou mãozinha, em vez de ser sempre uma seta. Lemos a forma REAL
+// do cursor do Windows — a que o próprio sistema está mostrando — e, para o que
+// está só sob a seta virtual (sem o cursor real ali), consultamos a janela
+// embaixo do ponto. Ver `cursorShape`/`cursorShapeAtPoint`.
+const CURSORINFO = koffi.struct('CURSORINFO', {
+  cbSize: 'uint32',
+  flags: 'uint32',
+  hCursor: 'uintptr',
+  ptScreenPos: 'POINT',
+});
+const CURSORINFO_SIZE = koffi.sizeof(CURSORINFO);
+// _Inout_: precisamos ENVIAR cbSize preenchido e LER de volta hCursor/flags.
+const GetCursorInfo = user32.func('int __stdcall GetCursorInfo(_Inout_ CURSORINFO *pci)');
+const LoadCursorW = user32.func('uintptr __stdcall LoadCursorW(uintptr hInstance, uintptr lpCursorName)');
+const WindowFromPoint = user32.func('uintptr __stdcall WindowFromPoint(POINT Point)');
+const GetClassLongPtrW = user32.func('uintptr __stdcall GetClassLongPtrW(uintptr hWnd, int nIndex)');
+const GCLP_HCURSOR = -12;
+const CURSOR_SHOWING = 0x00000001;
+
+/**
+ * Os cursores de sistema, pelo identificador que o Windows usa (IDC_*), mapeados
+ * para os nomes de forma que os dois lados entendem (iguais aos do CSS).
+ *
+ * O truque do `LoadCursorW(0, id)`: para os cursores padrão, o Windows devolve
+ * sempre o MESMO handle compartilhado, então comparar o handle atual do cursor
+ * com estes diz qual forma ele tem. Cursores próprios de um programa não batem
+ * com nenhum e viram 'default' — o certo, porque não sabemos desenhá-los.
+ */
+const IDC_PARA_TIPO: Record<number, TipoCursor> = {
+  32512: 'default', // IDC_ARROW
+  32513: 'text', // IDC_IBEAM
+  32514: 'wait', // IDC_WAIT
+  32515: 'crosshair', // IDC_CROSS
+  32516: 'default', // IDC_UPARROW
+  32642: 'nwse-resize', // IDC_SIZENWSE
+  32643: 'nesw-resize', // IDC_SIZENESW
+  32644: 'ew-resize', // IDC_SIZEWE
+  32645: 'ns-resize', // IDC_SIZENS
+  32646: 'move', // IDC_SIZEALL
+  32648: 'not-allowed', // IDC_NO
+  32649: 'pointer', // IDC_HAND
+  32650: 'progress', // IDC_APPSTARTING
+  32651: 'help', // IDC_HELP
+};
+
+/** handle do cursor padrão -> tipo, montado uma vez. `null` se o FFI falhar. */
+let tabelaCursores: Map<string, TipoCursor> | null = null;
+function carregarTabelaCursores(): Map<string, TipoCursor> | null {
+  if (tabelaCursores) return tabelaCursores;
+  try {
+    const tabela = new Map<string, TipoCursor>();
+    for (const [idTexto, tipo] of Object.entries(IDC_PARA_TIPO)) {
+      const h = LoadCursorW(0, Number(idTexto));
+      if (h) tabela.set(String(h), tipo);
+    }
+    tabelaCursores = tabela;
+    return tabela;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A forma do cursor REAL do Windows agora — a que o sistema está desenhando.
+ *
+ * É a forma exata onde o cursor de fato está: durante um arrasto (o visitante
+ * segurando o botão leva o cursor real junto) ou um clique, é este que dá o
+ * redimensionar/texto certo, inclusive dentro de programas que decidem o cursor
+ * na hora, como navegadores e editores.
+ */
+export function cursorShape(): TipoCursor {
+  const tabela = carregarTabelaCursores();
+  if (!tabela) return 'default';
+  try {
+    const info: { cbSize: number; flags: number; hCursor: number | bigint; ptScreenPos: { x: number; y: number } } = {
+      cbSize: CURSORINFO_SIZE,
+      flags: 0,
+      hCursor: 0,
+      ptScreenPos: { x: 0, y: 0 },
+    };
+    if (!GetCursorInfo(info)) return 'default';
+    // Cursor escondido (vídeo em tela cheia, jogo): não há forma a anunciar.
+    if (!(info.flags & CURSOR_SHOWING)) return 'default';
+    return tabela.get(String(info.hCursor)) ?? 'default';
+  } catch {
+    return 'default';
+  }
+}
+
+/**
+ * A forma que o cursor teria num PONTO, sem mover o cursor real até lá.
+ *
+ * Serve para a seta virtual que só paira sobre a tela: pergunta à janela que
+ * está embaixo do ponto qual é o cursor da CLASSE dela. Acerta os controles
+ * nativos do Windows — campos de texto (viga), links, Explorer — sem incomodar
+ * ninguém nem mover nada. Programas que desenham a interface por conta própria
+ * (navegadores, apps em Electron) têm uma janela só e não revelam a forma
+ * interna por aqui; para eles, a forma certa aparece no arrasto/clique, quando
+ * o cursor real vai ao ponto e `cursorShape` assume.
+ *
+ * @param x,y pixels físicos da área de trabalho virtual.
+ */
+export function cursorShapeAtPoint(x: number, y: number): TipoCursor {
+  const tabela = carregarTabelaCursores();
+  if (!tabela) return 'default';
+  try {
+    const hwnd = WindowFromPoint({ x: Math.round(x), y: Math.round(y) });
+    if (!hwnd) return 'default';
+    const hcur = GetClassLongPtrW(hwnd, GCLP_HCURSOR);
+    if (!hcur) return 'default';
+    return tabela.get(String(hcur)) ?? 'default';
+  } catch {
+    return 'default';
+  }
+}
 
 /**
  * Move o cursor SEM que o jogo perceba.

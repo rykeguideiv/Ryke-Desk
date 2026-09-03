@@ -13,23 +13,69 @@
  *      instalar Java à parte, mas o Gradle precisa saber onde ele está.
  */
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const AQUI = resolve(import.meta.dirname, '..');
 const ANDROID = join(AQUI, 'android');
 
 const sdk = join(process.env.LOCALAPPDATA ?? '', 'Android', 'Sdk');
-const jdk = 'C:/Program Files/Android/Android Studio/jbr';
+
+/**
+ * Escolhe um JDK que o Gradle deste projeto aceite RODAR.
+ *
+ * O JDK vem dentro do Android Studio (pasta `jbr`), mas as versões novas do
+ * Studio trazem um JDK muito à frente (25+) do que o Gradle 8.11.1 sabe usar —
+ * o Gradle só roda em Java 8 a 23 e simplesmente se recusa a iniciar num JDK
+ * mais novo, com uma mensagem que não diz que o problema é a versão. Então:
+ * preferimos um JDK 17–23 quando existir (o do `JAVA_HOME`, ou um Temurin
+ * instalado à parte), e só caímos no `jbr` se for a única opção.
+ */
+function versaoMajor(dir) {
+  try {
+    const m = /JAVA_VERSION="?(\d+)/.exec(readFileSync(join(dir, 'release'), 'utf8'));
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function temurinsInstalados() {
+  const base = 'C:/Program Files/Eclipse Adoptium';
+  try {
+    return readdirSync(base).map((d) => join(base, d));
+  } catch {
+    return [];
+  }
+}
+
+function escolherJdk() {
+  const candidatos = [
+    process.env.JAVA_HOME,
+    ...temurinsInstalados(),
+    'C:/Program Files/Android/Android Studio/jbr',
+  ].filter((d) => d && existsSync(join(d, 'bin', 'java.exe')));
+
+  let reserva = null;
+  for (const dir of candidatos) {
+    reserva ??= dir;
+    const major = versaoMajor(dir);
+    if (major !== null && major >= 17 && major <= 23) return dir;
+  }
+  return reserva;
+}
+
+const jdk = escolherJdk();
 
 if (!existsSync(sdk)) {
   console.error(`SDK do Android não encontrado em ${sdk}`);
   process.exit(1);
 }
-if (!existsSync(jdk)) {
-  console.error(`JDK não encontrado em ${jdk} (instale o Android Studio)`);
+if (!jdk) {
+  console.error('Nenhum JDK encontrado (instale o Android Studio ou um JDK 17–21).');
   process.exit(1);
 }
+console.log(`usando JDK: ${jdk} (Java ${versaoMajor(jdk) ?? '?'})`);
 
 // Barras normais: ver o comentário no topo.
 writeFileSync(join(ANDROID, 'local.properties'), `sdk.dir=${sdk.replace(/\\/g, '/')}\n`);

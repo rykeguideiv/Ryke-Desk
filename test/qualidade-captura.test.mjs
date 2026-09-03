@@ -9,8 +9,11 @@ const check = (rotulo, ok, extra = '') => {
 
 check('Alta comprime menos o JPEG que Média', P.alta.jpegQuality > P.media.jpegQuality);
 check('Média comprime menos que Baixa', P.media.jpegQuality > P.baixa.jpegQuality);
-check('Alta elimina a compressão JPEG da fonte', P.alta.lossless === true);
-check('os demais modos preservam desempenho usando JPEG', !P.auto.lossless && !P.media.lossless && !P.baixa.lossless);
+check('Alta usa JPEG de alta qualidade, não PNG sem perdas', P.alta.lossless === false && P.alta.jpegQuality >= 90);
+check(
+  'nenhum modo usa PNG sem perdas na rota reserva (PNG 4K por quadro travava a captura lenta)',
+  !P.alta.lossless && !P.auto.lossless && !P.media.lossless && !P.baixa.lossless,
+);
 check('Alta pede quadros com mais frequência que Média', P.alta.intervalMs < P.media.intervalMs);
 check('Média pede quadros com mais frequência que Baixa', P.media.intervalMs < P.baixa.intervalMs);
 check('Automática não reduz uma tela Full HD', P.auto.maxWidth >= 1920 && P.auto.maxHeight >= 1080);

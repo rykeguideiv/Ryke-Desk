@@ -6,7 +6,7 @@
  * lista muda de conteúdo raramente (alguém entra ou sai) e de posição o tempo
  * todo, e são coisas com custos muito diferentes.
  */
-import { corDoPonteiro, svgDaSeta, type Ponteiro } from '../../shared/ponteiros';
+import { corDoPonteiro, svgDaSeta, hotspotDaSeta, type Ponteiro } from '../../shared/ponteiros';
 
 const palco = document.getElementById('palco')!;
 const aviso = document.getElementById('aviso')!;
@@ -45,9 +45,9 @@ function desenhar(lista: Ponteiro[]): void {
     if (p.oculta) continue;
     vivos.add(p.id);
     let alvo = desenhadas.get(p.id);
-    // A marca é o que define o DESENHO (cor e nome). Enquanto ela não muda,
-    // só o transform é tocado — que é o caminho barato, sem relayout.
-    const marca = `${p.cor}|${p.nome}`;
+    // A marca é o que define o DESENHO (cor, nome e agora a FORMA). Enquanto ela
+    // não muda, só o transform é tocado — que é o caminho barato, sem relayout.
+    const marca = `${p.cor}|${p.nome}|${p.tipo ?? 'default'}`;
     if (!alvo) {
       const el = document.createElement('div');
       el.className = 'seta';
@@ -56,7 +56,11 @@ function desenhar(lista: Ponteiro[]): void {
       desenhadas.set(p.id, alvo);
     }
     if (alvo.marca !== marca) {
-      alvo.el.innerHTML = svgDaSeta(corDoPonteiro(p.cor), p.nome);
+      alvo.el.innerHTML = svgDaSeta(corDoPonteiro(p.cor), p.nome, p.tipo);
+      // O hotspot muda com a forma: a viga de texto aponta pelo centro, a seta
+      // pela ponta. Sem reencostar, a forma nova cairia deslocada do alvo.
+      const h = hotspotDaSeta(p.tipo);
+      alvo.el.style.margin = `${-h.y}px 0 0 ${-h.x}px`;
       alvo.marca = marca;
     }
     // A janela cobre exatamente o monitor capturado, então a fração da tela é

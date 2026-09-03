@@ -25,6 +25,12 @@
  * pequena. Sem isso, três setas coloridas na tela são três enigmas.
  */
 
+import type { TipoCursor } from './protocol';
+
+// A forma do cursor é parte do contrato de rede, então mora em `protocol.ts`.
+// Reexportamos aqui porque quem desenha as setas pensa nela junto com a cor.
+export type { TipoCursor };
+
 export type CorPonteiro = {
   /** Nome em português, para a interface falar dela ("sua seta é a azul"). */
   nome: string;
@@ -89,6 +95,134 @@ export const SETA_PATH = 'M1.6 1.2 L1.6 17 L5.4 13.4 L8 19.9 L10.7 18.8 L8.1 12.
 /** Ponta da seta, em pixels dentro do desenho — é por onde ela aponta. */
 export const SETA_HOTSPOT = { x: 2, y: 2 };
 
+/**
+ * O desenho de cada forma de cursor, na cor do visitante, e por onde ela aponta.
+ *
+ * `inner` recebe as cores e devolve o miolo do SVG (sem a plaquinha do nome).
+ * `hx/hy` é o ponto ativo dentro do desenho — o pixel que fica exatamente sobre
+ * o alvo, usado para encostar a forma no lugar certo (o "hotspot").
+ *
+ * Formas que não têm desenho próprio caem na seta comum: a SUA seta ainda
+ * mostra a forma exata, porque usa o cursor nativo do sistema; só o desenho que
+ * os OUTROS veem, e o da camada do anfitrião, recai na seta — um detalhe
+ * secundário que não vale um glifo tosco.
+ */
+type Glifo = { inner: (fill: string, stroke: string) => string; hx: number; hy: number };
+
+const setaGlifo: Glifo = {
+  inner: (fill, stroke) =>
+    `<path d="${SETA_PATH}" fill="${fill}" stroke="${stroke}" stroke-width="1.3" stroke-linejoin="round"/>`,
+  hx: SETA_HOTSPOT.x,
+  hy: SETA_HOTSPOT.y,
+};
+
+const GLIFOS: Partial<Record<TipoCursor, Glifo>> = {
+  default: setaGlifo,
+  // Cursor de texto (viga em I): duas barras horizontais e uma vertical.
+  text: {
+    inner: (fill, stroke) =>
+      `<g fill="${fill}" stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round">` +
+      `<rect x="8.6" y="2" width="2.8" height="18" rx="0.5"/>` +
+      `<rect x="5.6" y="2" width="8.8" height="2.4" rx="0.6"/>` +
+      `<rect x="5.6" y="17.6" width="8.8" height="2.4" rx="0.6"/></g>`,
+    hx: 10,
+    hy: 11,
+  },
+  // Setas duplas de redimensionamento — a família do "arrastar a borda".
+  'ew-resize': {
+    inner: (fill, stroke) =>
+      `<g fill="${fill}" stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round">` +
+      `<rect x="4" y="9.4" width="14" height="3.2" rx="0.6"/>` +
+      `<path d="M1.5 11 L6 7 L6 15 Z"/><path d="M20.5 11 L16 7 L16 15 Z"/></g>`,
+    hx: 11,
+    hy: 11,
+  },
+  'ns-resize': {
+    inner: (fill, stroke) =>
+      `<g fill="${fill}" stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round">` +
+      `<rect x="9.4" y="4" width="3.2" height="14" rx="0.6"/>` +
+      `<path d="M11 1.5 L7 6 L15 6 Z"/><path d="M11 20.5 L7 16 L15 16 Z"/></g>`,
+    hx: 11,
+    hy: 11,
+  },
+  'nwse-resize': {
+    inner: (fill, stroke) =>
+      `<g fill="${fill}" stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round">` +
+      `<path d="M5 6.4 L6.4 5 L18 16.6 L16.6 18 Z"/>` +
+      `<path d="M2.2 2.2 L9 3.4 L3.4 9 Z"/><path d="M19.8 19.8 L13 18.6 L18.6 13 Z"/></g>`,
+    hx: 11,
+    hy: 11,
+  },
+  'nesw-resize': {
+    inner: (fill, stroke) =>
+      `<g fill="${fill}" stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round">` +
+      `<path d="M17 6.4 L15.6 5 L4 16.6 L5.4 18 Z"/>` +
+      `<path d="M19.8 2.2 L13 3.4 L18.6 9 Z"/><path d="M2.2 19.8 L9 18.6 L3.4 13 Z"/></g>`,
+    hx: 11,
+    hy: 11,
+  },
+  // Mover (quatro setas): o cursor de arrastar uma janela ou seleção inteira.
+  move: {
+    inner: (fill, stroke) =>
+      `<g fill="${fill}" stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round">` +
+      `<rect x="9.4" y="5" width="3.2" height="12" rx="0.6"/><rect x="5" y="9.4" width="12" height="3.2" rx="0.6"/>` +
+      `<path d="M11 1.5 L7.6 5.5 L14.4 5.5 Z"/><path d="M11 20.5 L7.6 16.5 L14.4 16.5 Z"/>` +
+      `<path d="M1.5 11 L5.5 7.6 L5.5 14.4 Z"/><path d="M20.5 11 L16.5 7.6 L16.5 14.4 Z"/></g>`,
+    hx: 11,
+    hy: 11,
+  },
+  // Cruz de precisão.
+  crosshair: {
+    inner: (fill, stroke) =>
+      `<g fill="${fill}" stroke="${stroke}" stroke-width="0.7" stroke-linejoin="round">` +
+      `<rect x="9.9" y="1.5" width="2.2" height="19" rx="0.3"/><rect x="1.5" y="9.9" width="19" height="2.2" rx="0.3"/></g>`,
+    hx: 11,
+    hy: 11,
+  },
+  // Proibido: o círculo cortado.
+  'not-allowed': {
+    inner: (_fill, stroke) =>
+      `<g fill="none" stroke-linecap="round">` +
+      `<circle cx="11" cy="11" r="7.6" stroke="${stroke}" stroke-width="4.2"/>` +
+      `<line x1="5.6" y1="5.6" x2="16.4" y2="16.4" stroke="${stroke}" stroke-width="4.2"/>` +
+      `<circle cx="11" cy="11" r="7.6" stroke="#e11d1d" stroke-width="2.5"/>` +
+      `<line x1="5.6" y1="5.6" x2="16.4" y2="16.4" stroke="#e11d1d" stroke-width="2.5"/></g>`,
+    hx: 11,
+    hy: 11,
+  },
+};
+
+/** A forma cai na seta comum quando não há desenho próprio. */
+function glifoDoCursor(tipo: TipoCursor | undefined): Glifo {
+  return (tipo && GLIFOS[tipo]) || setaGlifo;
+}
+
+/** Por onde a forma aponta — usado para encostá-la no ponto certo na tela. */
+export function hotspotDaSeta(tipo?: TipoCursor): { x: number; y: number } {
+  const g = glifoDoCursor(tipo);
+  return { x: g.hx, y: g.hy };
+}
+
+/**
+ * Só a forma do cursor, sem a plaquinha do nome.
+ *
+ * É o que a seta do ANFITRIÃO usa: o nome da máquina já vai numa etiqueta
+ * separada ao lado, então aqui basta o desenho — na cor clara e neutra do
+ * cursor do dono, que muda de forma sem virar mais uma seta colorida.
+ */
+export function svgDoCursorSozinho(cor: CorPonteiro, tipo?: TipoCursor): string {
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">` +
+    glifoDoCursor(tipo).inner(cor.fill, cor.stroke) +
+    `</svg>`
+  );
+}
+
+/** É a seta comum? Então o visitante mantém a própria seta colorida. */
+export function ehCursorPadrao(tipo?: TipoCursor): boolean {
+  return !tipo || tipo === 'default';
+}
+
 /** Um ponteiro virtual em trânsito: posição em fração da tela (0..1). */
 export type Ponteiro = {
   /** Número Ryke de quem comanda esta seta. */
@@ -113,6 +247,12 @@ export type Ponteiro = {
    * exatamente o que ele não pode ter.
    */
   oculta?: boolean;
+  /**
+   * A forma da seta agora, conforme o que há embaixo dela no anfitrião.
+   *
+   * Ausente ou 'default' = a seta comum. Ver `TipoCursor`.
+   */
+  tipo?: TipoCursor;
 };
 
 /** Corta nomes longos para a plaquinha não virar uma faixa atravessando a tela. */
@@ -140,14 +280,14 @@ function escaparXml(texto: string): string {
  * as três versões envelhecerem separadas, que é como uma delas acaba com a
  * cor certa e o nome errado.
  */
-export function svgDaSeta(cor: CorPonteiro, nome: string): string {
+export function svgDaSeta(cor: CorPonteiro, nome: string, tipo?: TipoCursor): string {
   const texto = escaparXml(nomeCurto(nome));
   // ~6,2 px por caractere a 10 px de altura, mais um respiro de cada lado.
   const larguraEtiqueta = Math.max(28, Math.round(texto.length * 6.2) + 12);
   const largura = Math.max(24, larguraEtiqueta + 4);
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${largura}" height="42" viewBox="0 0 ${largura} 42">`,
-    `<path d="${SETA_PATH}" fill="${cor.fill}" stroke="${cor.stroke}" stroke-width="1.3" stroke-linejoin="round"/>`,
+    glifoDoCursor(tipo).inner(cor.fill, cor.stroke),
     `<rect x="4" y="24" width="${larguraEtiqueta}" height="14" rx="4" fill="${cor.etiqueta}" opacity="0.95"/>`,
     `<text x="${4 + larguraEtiqueta / 2}" y="34" font-family="Segoe UI, Arial, sans-serif" font-size="10"`,
     ` font-weight="600" fill="${cor.texto}" text-anchor="middle">${texto}</text>`,
