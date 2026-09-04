@@ -47,7 +47,7 @@ inicio = new Adaptador();
 for (let i = 0; i < 3; i++) inicio.decidir(bancaFria);
 let recuperou;
 for (let i = 0; i < 20; i++) recuperou = inicio.decidir({ bancaDisponivel: 20e6, rtt: 25, perda: 0, limitacao: 'none' });
-check('rede que só estava esquentando volta ao topo', recuperou.scaleResolutionDownBy === 1 && recuperou.maxFramerate === 30,
+check('rede que só estava esquentando volta ao topo', recuperou.scaleResolutionDownBy === 1 && recuperou.maxFramerate === 60,
   mb(recuperou.maxBitrate));
 
 // ───────────────── rede ótima: sobe até o teto ─────────────────
@@ -59,7 +59,19 @@ for (let i = 0; i < 40; i++) ajuste = a.decidir(boa);
 check('numa rede boa a qualidade sobe', ajuste.maxBitrate > 4_000_000, mb(ajuste.maxBitrate));
 check('mas nunca passa do teto', ajuste.maxBitrate <= TETO_BITRATE, mb(ajuste.maxBitrate));
 check('e usa a resolução cheia', ajuste.scaleResolutionDownBy === 1);
-check('com 30 quadros por segundo', ajuste.maxFramerate === 30);
+// 60, e não 30: era este o teto que segurava a fluidez. Por mais banda que
+// sobrasse, o adaptador nunca passava de 30 quadros — no diagnóstico dava
+// para ver 30 qps gastando 0,5 de 8 Mb/s, com a GPU ociosa. 60 é o que
+// separa "funciona" de "parece a máquina local".
+check('com 60 quadros por segundo, que é o que a rede aguenta', ajuste.maxFramerate === 60,
+  `${ajuste.maxFramerate} qps`);
+
+// O degrau só vale com banda de verdade: em rede apertada, mais quadros
+// significa menos bits por quadro, e a imagem vira um borrão em movimento.
+const redeModesta = new Adaptador();
+let modesto;
+for (let i = 0; i < 40; i++) modesto = redeModesta.decidir({ bancaDisponivel: 3.2e6, rtt: 40, perda: 0, limitacao: 'none' });
+check('em rede modesta os quadros NÃO sobem a 60', modesto.maxFramerate < 60, `${modesto.maxFramerate} qps`);
 
 // ───────────── nunca ultrapassa o que a rede comporta ─────────────
 

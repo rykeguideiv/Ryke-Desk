@@ -1,6 +1,6 @@
 {
   "name": "ryke-desk",
-  "version": "1.0.35",
+  "version": "1.0.40",
   "private": true,
   "description": "Ryke Desk — acesso remoto seguro entre computadores",
   "license": "GPL-3.0-or-later",
@@ -15,7 +15,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/auth.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/transfers.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/servidor-padrao.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/mqtt.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/encontro.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/malha.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/qualidade-captura.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/qualidade-video.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/adaptacao.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/vigilancia.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/barra.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/teclado-global.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/botoes.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/ponteiros.test.mjs && node test/shared-espelhado.test.mjs && node test/input-abi.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/clipboard-arquivos.test.mjs && node test/instalador.test.mjs",
+    "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/auth.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/transfers.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/servidor-padrao.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/mqtt.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/encontro.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/malha.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/qualidade-captura.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/qualidade-video.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/adaptacao.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/vigilancia.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/barra.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/teclado-global.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/botoes.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/ponteiros.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/emprestimo-cursor.test.mjs && node test/shared-espelhado.test.mjs && node test/input-abi.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/clipboard-arquivos.test.mjs && node test/area-protegida.test.mjs && node test/modo-admin.test.mjs && node test/instalador.test.mjs",
     "test:e2e": "npm run build && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/ts-resolve.mjs test/e2e.mjs",
     "test": "npm run test:unit && npm run test:e2e",
     "icon": "powershell -ExecutionPolicy Bypass -File build/make-icon.ps1",
@@ -54,15 +54,23 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "build/icon.ico", "to": "icon.ico" },
-      { "from": "build/icon.png", "to": "icon.png" }
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
     ],
     "asarUnpack": [
       "**/node_modules/koffi/**"
     ],
     "win": {
       "icon": "build/icon.ico",
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "requestedExecutionLevel": "asInvoker",
       "artifactName": "RykeDesk-Setup-${version}.${ext}"
     },

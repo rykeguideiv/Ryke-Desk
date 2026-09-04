@@ -59,6 +59,9 @@ const GetSystemMetrics = user32.func('int __stdcall GetSystemMetrics(int nIndex)
 // assinatura abaixo; a constante em si não é usada em lugar nenhum.
 koffi.struct('POINT', { x: 'long', y: 'long' });
 const GetCursorPos = user32.func('int __stdcall GetCursorPos(_Out_ POINT *p)');
+// Quanto o Windows considera "dois cliques seguidos". Configurável pela pessoa
+// no painel do mouse, por isso perguntamos em vez de fixar 500 ms.
+const GetDoubleClickTime = user32.func('uint32 __stdcall GetDoubleClickTime()');
 
 // ── forma do cursor (GetCursorInfo) ───────────────────────────────
 //
@@ -78,6 +81,23 @@ const CURSORINFO_SIZE = koffi.sizeof(CURSORINFO);
 const GetCursorInfo = user32.func('int __stdcall GetCursorInfo(_Inout_ CURSORINFO *pci)');
 const LoadCursorW = user32.func('uintptr __stdcall LoadCursorW(uintptr hInstance, uintptr lpCursorName)');
 const WindowFromPoint = user32.func('uintptr __stdcall WindowFromPoint(POINT Point)');
+
+// ── a área protegida do Windows (UAC e tela bloqueada) ────────────
+//
+// Quando o UAC pergunta "deseja permitir?", o Windows TROCA de área de
+// trabalho: a normal fica congelada atrás de uma área protegida, onde nenhum
+// programa comum entra. Para o acesso remoto isso é um apagão total — a captura
+// para de entregar quadros, o SendInput não chega a lugar nenhum, e do outro
+// lado a sessão simplesmente congela sem explicação nenhuma.
+//
+// `OpenInputDesktop` é como se pergunta: ele falha justamente quando a área de
+// entrada não é a nossa. É a diferença entre "a tela está parada porque ninguém
+// mexeu" e "a tela está parada porque o Windows saiu de baixo de nós".
+const OpenInputDesktop = user32.func(
+  'uintptr __stdcall OpenInputDesktop(uint32 dwFlags, int fInherit, uint32 dwDesiredAccess)',
+);
+const CloseDesktop = user32.func('int __stdcall CloseDesktop(uintptr hDesktop)');
+const DESKTOP_SWITCHDESKTOP = 0x0100;
 const GetClassLongPtrW = user32.func('uintptr __stdcall GetClassLongPtrW(uintptr hWnd, int nIndex)');
 const GCLP_HCURSOR = -12;
 const CURSOR_SHOWING = 0x00000001;
@@ -237,6 +257,14 @@ const MOUSEEVENTF_RIGHTDOWN = 0x0008;
 const MOUSEEVENTF_RIGHTUP = 0x0010;
 const MOUSEEVENTF_MIDDLEDOWN = 0x0020;
 const MOUSEEVENTF_MIDDLEUP = 0x0040;
+// Os laterais (polegar): um par só de sinalizadores para os dois, e QUAL deles
+// foi vai no campo `mouseData` — daí eles não entrarem na tabela BUTTON_FLAGS.
+const MOUSEEVENTF_XDOWN = 0x0080;
+const MOUSEEVENTF_XUP = 0x0100;
+/** O lateral de trás, que nos navegadores é "voltar". */
+const XBUTTON1 = 0x0001;
+/** O lateral da frente, que é "avançar". */
+const XBUTTON2 = 0x0002;
 const MOUSEEVENTF_WHEEL = 0x0800;
 const MOUSEEVENTF_HWHEEL = 0x1000;
 const MOUSEEVENTF_VIRTUALDESK = 0x4000;
@@ -344,15 +372,40 @@ export function moveMouseRelative(dx: number, dy: number): void {
   dispatch([mouseInput(MOUSEEVENTF_MOVE, Math.round(dx), Math.round(dy))]);
 }
 
-const BUTTON_FLAGS = [
-  [MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP],
-  [MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP],
-  [MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP],
-] as const;
+/**
+ * Apertar e soltar de cada botão que tem par próprio no Windows.
+ *
+ * Um mapa, e não uma lista: com os laterais no tipo, uma lista de três posições
+ * indexada por `BotaoMouse` deixaria de bater — e é o que o compilador acusa.
+ * Os laterais ficam em `BOTOES_LATERAIS`, logo abaixo, porque no Windows eles
+ * seguem por outro caminho.
+ */
+const BUTTON_FLAGS: Partial<Record<BotaoMouse, readonly [number, number]>> = {
+  0: [MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP],
+  1: [MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP],
+  2: [MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP],
+};
 const heldButtons = new Set<BotaoMouse>();
 
-/** @param button 0 = esquerdo, 1 = meio, 2 = direito (mesma ordem do DOM) */
-export function mouseButton(button: 0 | 1 | 2, down: boolean): void {
+/**
+ * Qual lateral é qual, no jeito do Windows.
+ *
+ * Os três primeiros botões têm cada um o seu par de sinalizadores; os laterais
+ * dividem um par só (XDOWN/XUP) e se distinguem pelo `mouseData`. Por isso eles
+ * moram neste mapa, e não na tabela acima.
+ */
+const BOTOES_LATERAIS: Partial<Record<BotaoMouse, number>> = { 3: XBUTTON1, 4: XBUTTON2 };
+
+/**
+ * @param button 0 esquerdo, 1 meio, 2 direito, 3 voltar, 4 avançar — a ordem do DOM.
+ */
+export function mouseButton(button: BotaoMouse, down: boolean): void {
+  const lateral = BOTOES_LATERAIS[button];
+  if (lateral !== undefined) {
+    if (!mudarBotao(heldButtons, button, down)) return;
+    dispatch([mouseInput(down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP, 0, 0, lateral)]);
+    return;
+  }
   const pair = BUTTON_FLAGS[button];
   if (!pair) return;
   if (!mudarBotao(heldButtons, button, down)) return;
@@ -450,12 +503,51 @@ export function releaseAll(): void {
  * Impede que o teclado/mouse físicos do anfitrião interfiram na sessão.
  * Exige processo elevado; devolve false quando não foi permitido.
  */
+/**
+ * O Windows está mostrando a área protegida (UAC ou tela bloqueada)?
+ *
+ * Enquanto isto for verdade, a captura não entrega quadro nenhum e a entrada
+ * injetada não chega a lugar nenhum — a sessão está viva, mas cega e muda.
+ * Saber disso é o que permite avisar quem está do outro lado, em vez de deixar
+ * a tela congelada sem explicação, e reerguer a captura quando a área normal
+ * voltar (ela não volta sozinha).
+ */
+export function desktopSeguroAtivo(): boolean {
+  try {
+    const h = OpenInputDesktop(0, 0, DESKTOP_SWITCHDESKTOP);
+    // Sem alça = a área de entrada não é a nossa: o UAC (ou o bloqueio de tela)
+    // está na frente.
+    if (!h) return true;
+    CloseDesktop(h);
+    return false;
+  } catch {
+    // Na dúvida, dizemos que está tudo normal: um falso "está bloqueado"
+    // dispararia recapturas à toa.
+    return false;
+  }
+}
+
 /** Posição atual do cursor, em pixels físicos da área de trabalho virtual. */
 export function cursorPosition(): { x: number; y: number } | null {
   const p: { x?: number; y?: number } = {};
   if (!GetCursorPos(p)) return null;
   if (typeof p.x !== 'number' || typeof p.y !== 'number') return null;
   return { x: p.x, y: p.y };
+}
+
+/**
+ * O intervalo, em milissegundos, dentro do qual o Windows chama dois cliques
+ * de duplo clique. Padrão 500 ms, mas a pessoa pode ter afrouxado no painel do
+ * mouse — e é justamente quem afrouxou que ficaria sem duplo clique se
+ * chutássemos o número.
+ */
+export function doubleClickTime(): number {
+  try {
+    const ms = GetDoubleClickTime();
+    return typeof ms === 'number' && ms > 0 ? ms : 500;
+  } catch {
+    return 500;
+  }
 }
 
 /**

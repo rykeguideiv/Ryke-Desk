@@ -10,6 +10,7 @@ import type { Favorito, Papel, ScryptParams, Settings } from '../shared/config';
 import type { PerfilCapturaSoftware } from '../shared/qualidade-captura';
 import type { Ponteiro } from '../shared/ponteiros';
 import type { TipoCursor } from '../shared/protocol';
+import type { BotaoMouse } from '../shared/botoes';
 
 const api = {
   app: {
@@ -185,13 +186,13 @@ const api = {
    */
   input: {
     move: (peerId: string, fx: number, fy: number) => ipcRenderer.send('input:move', peerId, fx, fy),
-    button: (peerId: string, button: 0 | 1 | 2, down: boolean, fx: number, fy: number) =>
+    button: (peerId: string, button: BotaoMouse, down: boolean, fx: number, fy: number) =>
       ipcRenderer.send('input:button', peerId, button, down, fx, fy),
     // Modo Gamer: deslocamento relativo e clique sem reposicionar o cursor.
     moveRel: (peerId: string, dx: number, dy: number) => ipcRenderer.send('input:moveRel', peerId, dx, dy),
     /** Entrou/saiu do Modo Gamer: some com a seta e prende o ponteiro no centro. */
     gamer: (peerId: string, on: boolean) => ipcRenderer.send('input:gamer', peerId, on),
-    buttonRel: (button: 0 | 1 | 2, down: boolean) => ipcRenderer.send('input:buttonRel', button, down),
+    buttonRel: (button: BotaoMouse, down: boolean) => ipcRenderer.send('input:buttonRel', button, down),
     wheel: (peerId: string, dx: number, dy: number, fx: number, fy: number) =>
       ipcRenderer.send('input:wheel', peerId, dx, dy, fx, fy),
     key: (code: string, down: boolean) => ipcRenderer.send('input:key', code, down),
@@ -305,6 +306,30 @@ const api = {
    * segundo, onde cada seta está — para a interface repassar a cada visitante
    * as setas dos OUTROS.
    */
+  /**
+   * O passe de retorno da troca de modo.
+   *
+   * Trocar para administrador reabre o programa. Sem isto, uma conexão
+   * supervisionada (sem senha) precisaria ser autorizada de novo — pela mesma
+   * pessoa que acabou de pedir a troca. Vale só para quem já estava conectado,
+   * por dois minutos, e uma vez só por número.
+   */
+  passe: {
+    consumir: (peerId: string): Promise<boolean> => ipcRenderer.invoke('passe:consumir', peerId),
+  },
+
+  /**
+   * A área protegida do Windows (o UAC) entrou ou saiu da frente.
+   *
+   * Enquanto ela está na frente a captura não entrega quadro nenhum e a
+   * entrada injetada não chega a lugar nenhum: a sessão fica viva, porém cega
+   * e muda. Ao SAIR, a captura não volta sozinha — quem ouve isto precisa
+   * reerguê-la, senão a tela fica congelada para sempre.
+   */
+  captura: {
+    onAreaProtegida: (fn: (ativa: boolean) => void) => subscribe('captura:areaProtegida', fn),
+  },
+
   ponteiros: {
     entrar: (peerId: string, nome: string, cor: number) => ipcRenderer.send('ponteiros:entrar', peerId, nome, cor),
     sair: (peerId: string) => ipcRenderer.send('ponteiros:sair', peerId),

@@ -72,7 +72,19 @@ export const PERFIS_QUALIDADE: Record<Quality, PerfilQualidade> = {
   baixa: { maxBitrate: 1_500_000, alturaAlvo: 720, framerate: 30, hint: 'motion', degradation: 'maintain-framerate' },
   // Padrão adaptativo. A banda aqui vale só até a primeira medida do adaptador;
   // a altura-alvo é o teto que o adaptador nunca ultrapassa (ver ALTURA_MAX_AUTO).
-  auto: { maxBitrate: 8_000_000, alturaAlvo: ALTURA_MAX_AUTO, hint: 'detail', degradation: 'balanced' },
+  // 'maintain-framerate', e não 'balanced': sob pressão o codificador cede
+  // RESOLUÇÃO e segura os quadros. É a troca certa para acesso remoto — uma
+  // imagem um pouco menor continua utilizável, enquanto quadros picotados
+  // fazem o mouse parecer atrasado, que é a queixa que se sente na mão. A
+  // altura-alvo e o adaptador já cuidam de não exagerar na resolução.
+  auto: {
+    maxBitrate: 12_000_000,
+    alturaAlvo: ALTURA_MAX_AUTO,
+    // Sem framerate aqui de propósito: em automático quem manda nos quadros é
+    // o adaptador, medindo a rede. Fixar um número seria disputar o volante.
+    hint: 'detail',
+    degradation: 'maintain-framerate',
+  },
 };
 
 /**

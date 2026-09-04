@@ -25,7 +25,8 @@
  * olho percebe a diferença numa área de trabalho remota:
  *
  *   1. TAXA DE BITS — primeiro a ceder; degrada só a nitidez de detalhes.
- *   2. QUADROS POR SEGUNDO — 30 é confortável, 20 ainda é bom, 12 é usável.
+ *   2. QUADROS POR SEGUNDO — 60 quando a banda deixa (é o que dá a sensação
+ *      de máquina local), 30 é confortável, 20 ainda é bom, 12 é usável.
  *   3. RESOLUÇÃO — a última a cair, porque texto borrado é o que mais
  *      atrapalha quem está trabalhando na máquina do outro.
  *
@@ -192,7 +193,13 @@ function quadrosPara(bitrate: number): number {
   if (bitrate < 700_000) return 12;
   if (bitrate < 1_500_000) return 20;
   if (bitrate < 3_000_000) return 26;
-  return 30;
+  if (bitrate < 5_000_000) return 30;
+  // Com banda de sobra, 60. Este degrau faltava: o teto era 30 mesmo numa rede
+  // que aguentava muito mais, e o resultado era exatamente o que se via no
+  // diagnóstico — 30 quadros gastando 0,5 de 8 Mbps, com a GPU ociosa. Quem
+  // compara com outros programas de acesso remoto sente essa diferença na hora,
+  // porque 60 quadros é o que separa "funciona" de "parece a máquina local".
+  return 60;
 }
 
 /**

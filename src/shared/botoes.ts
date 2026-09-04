@@ -1,4 +1,15 @@
-export type BotaoMouse = 0 | 1 | 2;
+/**
+ * Os botões do mouse, na numeração do DOM — a mesma que o navegador entrega em
+ * `MouseEvent.button` e que o visitante repassa sem traduzir:
+ *
+ *   0 esquerdo · 1 meio · 2 direito · 3 voltar · 4 avançar
+ *
+ * Os dois últimos são os laterais, os do polegar. Eles não cabem no mesmo molde
+ * dos três primeiros: no Windows, cada um daqueles tem o próprio par de
+ * sinalizadores (LEFTDOWN/LEFTUP…), enquanto os laterais dividem UM par só
+ * (XDOWN/XUP) e informam qual deles foi num campo à parte. Ver `mouseButton`.
+ */
+export type BotaoMouse = 0 | 1 | 2 | 3 | 4;
 
 /**
  * Atualiza o estado de um botão e diz se um evento precisa ser enviado.

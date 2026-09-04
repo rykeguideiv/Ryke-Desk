@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatId, formatBytes } from '../../../shared/protocol';
 import { COMBOS } from '../../../shared/keymap';
+import type { BotaoMouse } from '../../../shared/botoes';
 import { pointerToFraction, wheelToTicks, type Fraction } from '../lib/geometry';
 import {
   corDoPonteiro,
@@ -807,7 +808,11 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
 
   const onPointerDown = (e: React.PointerEvent<HTMLVideoElement>): void => {
     const video = videoRef.current;
-    if (!video || !session || e.button > 2) return;
+    if (!video || !session || e.button > 4) return;
+    // Os laterais (3 = voltar, 4 = avançar) precisam ser barrados NESTA janela:
+    // soltos, o Chromium os entende como navegação e sairia da tela da sessão.
+    // Quem tem de voltar e avançar é o computador REMOTO, não o Ryke Desk.
+    if (e.button >= 3) e.preventDefault();
 
     if (gamer) {
       // Fora da trava, o primeiro clique só serve para PRENDER o ponteiro — é
@@ -817,7 +822,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         void video.requestPointerLock?.();
         return;
       }
-      session.sendMouseRelButton(e.button as 0 | 1 | 2, true);
+      session.sendMouseRelButton(e.button as BotaoMouse, true);
       return;
     }
 
@@ -836,21 +841,25 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     }
     const point = pointerToFraction(video, e.clientX, e.clientY) ?? lastPoint.current;
     lastPoint.current = point;
-    session.sendMouseButton(e.button as 0 | 1 | 2, true, point.x, point.y);
+    session.sendMouseButton(e.button as BotaoMouse, true, point.x, point.y);
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLVideoElement>): void => {
     const video = videoRef.current;
-    if (!video || !session || e.button > 2) return;
+    if (!video || !session || e.button > 4) return;
+    // Os laterais (3 = voltar, 4 = avançar) precisam ser barrados NESTA janela:
+    // soltos, o Chromium os entende como navegação e sairia da tela da sessão.
+    // Quem tem de voltar e avançar é o computador REMOTO, não o Ryke Desk.
+    if (e.button >= 3) e.preventDefault();
 
     if (gamer) {
-      if (document.pointerLockElement === video) session.sendMouseRelButton(e.button as 0 | 1 | 2, false);
+      if (document.pointerLockElement === video) session.sendMouseRelButton(e.button as BotaoMouse, false);
       return;
     }
 
     if (video.hasPointerCapture(e.pointerId)) video.releasePointerCapture(e.pointerId);
     const point = pointerToFraction(video, e.clientX, e.clientY) ?? lastPoint.current;
-    session.sendMouseButton(e.button as 0 | 1 | 2, false, point.x, point.y);
+    session.sendMouseButton(e.button as BotaoMouse, false, point.x, point.y);
   };
 
   // A roda precisa de listener não-passivo para podermos cancelar o zoom

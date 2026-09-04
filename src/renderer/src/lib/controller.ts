@@ -217,6 +217,18 @@ export class Controller {
   private pendingPasswords = new Map<string, string>();
   /** Senhas a gravar SE a conexão der certo, por número. Ver `connect`. */
   private senhasParaLembrar = new Map<string, string>();
+  /**
+   * Senha de cada sessão ATIVA, guardada para reconectar sozinho depois de uma
+   * troca de modo (admin) — a queda ali é esperada e o host volta em segundos.
+   * Só existe enquanto a aba existe; some no disconnect do usuário.
+   */
+  private senhasSessao = new Map<string, string>();
+  /**
+   * Números cujo host acabou de ser mandado trocar de modo (admin↔normal). A
+   * conexão vai cair porque o processo do outro lado reabre — mas, em vez de
+   * falhar, ficamos AGUARDANDO e reconectamos assim que ele voltar à malha.
+   */
+  private aguardandoReinicio = new Set<string>();
   /** Anfitrião: nonce emitido para cada número que bateu à porta. */
   private pendingNonces = new Map<string, string>();
   /** Pedidos supervisionados aguardam em fila; nenhum recebe "ocupado". */
@@ -768,6 +780,9 @@ export class Controller {
     }
 
     this.pendingPasswords.set(peerId, password);
+    // Retida durante toda a sessão (não só até autenticar) para poder reconectar
+    // sozinho após uma troca de modo. Some no disconnect do usuário.
+    this.senhasSessao.set(peerId, password);
     // Guardada só depois de a senha ser aceita: gravar antes deixaria uma
     // senha errada salva, e o usuário passaria a falhar sempre sem entender.
     if (lembrarSenha && password.length > 0) this.senhasParaLembrar.set(peerId, password);
@@ -849,7 +864,10 @@ export class Controller {
   private async onAccepted(from: string): Promise<void> {
     this.clearKnockTimeout(from);
     this.pendingPasswords.delete(from);
-    this.patchAba(from, { phase: 'negociando' });
+    // Aceitou: se estávamos aguardando o host reabrir (troca de modo), acabou a
+    // espera — reconectou.
+    this.aguardandoReinicio.delete(from);
+    this.patchAba(from, { phase: 'negociando', instavel: false });
 
     const session = new Session('visitante', from, this.signaling!, this.iceServers);
     this.viewerSessions.set(from, session);
@@ -889,6 +907,13 @@ export class Controller {
     session.on('transfers', () => this.refreshTransfers());
     session.on('closed', (reason) => {
       this.viewerSessions.delete(from);
+      // Troca de modo (admin): a queda é ESPERADA — o host reabre em segundos.
+      // Em vez de fechar a aba, ficamos aguardando e reconectando sozinhos.
+      if (this.aguardandoReinicio.has(from) && this.state.abas.some((a) => a.peerId === from)) {
+        this.patchAba(from, { phase: 'discando', instavel: true, error: null });
+        void this.reconectarAdmin(from);
+        return;
+      }
       this.removerAba(from);
       // Só a ÚLTIMA aba devolve a janela ao estado normal. Antes isto era
       // incondicional, e com abas teria o efeito de tirar da tela cheia e
@@ -905,6 +930,8 @@ export class Controller {
     this.clearKnockTimeout(peerId);
     this.pendingPasswords.delete(peerId);
     this.senhasParaLembrar.delete(peerId);
+    this.senhasSessao.delete(peerId);
+    this.aguardandoReinicio.delete(peerId);
     this.viewerSessions.get(peerId)?.close(message);
     this.viewerSessions.delete(peerId);
     this.removerAba(peerId);
@@ -922,6 +949,9 @@ export class Controller {
     this.clearKnockTimeout(alvo);
     this.pendingPasswords.delete(alvo);
     this.senhasParaLembrar.delete(alvo);
+    // Fechar de propósito cancela qualquer reconexão automática pendente.
+    this.senhasSessao.delete(alvo);
+    this.aguardandoReinicio.delete(alvo);
     const sessao = this.viewerSessions.get(alvo);
     this.viewerSessions.delete(alvo);
     this.removerAba(alvo);
@@ -962,6 +992,15 @@ export class Controller {
     if (modo === 'pedido') {
       if (this.state.settings?.allowSupervisedAccess === false) {
         this.signaling?.send(from, { t: 'denied', reason: 'exige-senha' });
+        return;
+      }
+      // Voltando de uma troca de modo: quem já estava conectado no instante da
+      // troca não precisa ser autorizado outra vez. Quem pediu a troca foi a
+      // pessoa desta máquina, segundos atrás — perguntar de novo não protege
+      // nada e só deixa o outro lado esperando. O passe vale dois minutos e é
+      // gasto na primeira usada; fora disso, tudo segue pelo caminho normal.
+      if (await window.ryke.passe.consumir(from)) {
+        void this.startHostSession(from, 'pedido');
         return;
       }
       return this.pedirAutorizacao(from, 'pedido');
@@ -1265,15 +1304,67 @@ export class Controller {
    * a imagem fica lenta — é um modo temporário, para a tarefa e volta.
    */
   trocarModoAdminRemoto(ligar: boolean): void {
+    const peerId = this.state.abaAtiva;
     const sessao = this.viewer;
-    if (!sessao) return;
+    if (!peerId || !sessao) return;
+    // Reconectar sozinho só é possível com senha (modo 'pedido' precisaria de
+    // alguém no host para clicar em Permitir, e lá ninguém está).
+    const temSenha = (this.senhasSessao.get(peerId) ?? '').length > 0;
+    if (temSenha) this.aguardandoReinicio.add(peerId);
     sessao.enviarModoAdmin(ligar);
     this.toast(
       'ok',
-      ligar
-        ? 'Entrando em modo administrador no PC remoto… a conexão vai cair e reabrir. Reconecte em alguns segundos.'
-        : 'Voltando ao modo normal no PC remoto… a conexão vai cair e reabrir. Reconecte em alguns segundos.',
+      temSenha
+        ? (ligar
+            ? 'Entrando em modo administrador no PC remoto… a conexão cai e reconecta sozinha em alguns segundos.'
+            : 'Voltando ao modo normal no PC remoto… a conexão cai e reconecta sozinha em alguns segundos.')
+        : 'O PC remoto vai trocar de modo e a conexão vai cair. Como você entrou sem senha, reconecte manualmente quando ele voltar.',
     );
+  }
+
+  /**
+   * Fica batendo à porta do host até ele reabrir (troca de modo) e reconecta.
+   *
+   * O host reabre o próprio processo para trocar de nível de privilégio — a
+   * queda é certa, mas dura poucos segundos. Enquanto a aba existir e ainda
+   * estivermos aguardando, rebatemos com a senha guardada a cada 3 s, até o
+   * host voltar à malha e aceitar (aí `onAccepted` limpa o aguardo) ou estourar
+   * o tempo. Sem isto, a troca de modo terminava numa sessão morta.
+   */
+  private async reconectarAdmin(peerId: string): Promise<void> {
+    const senha = this.senhasSessao.get(peerId);
+    if (senha === undefined || senha.length === 0) {
+      this.aguardandoReinicio.delete(peerId);
+      return;
+    }
+    const inicio = Date.now();
+    const LIMITE_MS = 60_000; // reabrir + entrar na malha leva alguns segundos
+    // Um respiro inicial: o host mal começou a fechar; bater agora é desperdício.
+    await new Promise((r) => setTimeout(r, 3500));
+    while (this.aguardandoReinicio.has(peerId) && Date.now() - inicio < LIMITE_MS) {
+      // Aba fechada pelo usuário, ou já reconectou por outro caminho: para.
+      if (!this.state.abas.some((a) => a.peerId === peerId)) {
+        this.aguardandoReinicio.delete(peerId);
+        return;
+      }
+      if (this.signaling?.connected) {
+        this.pendingPasswords.set(peerId, senha);
+        this.signaling.send(peerId, {
+          t: 'knock',
+          app: 'ryke-desk',
+          name: this.state.machineName,
+          modo: 'senha',
+        });
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    // Saiu do laço ainda aguardando = não voltou a tempo.
+    if (this.aguardandoReinicio.has(peerId)) {
+      this.aguardandoReinicio.delete(peerId);
+      if (this.state.abas.some((a) => a.peerId === peerId)) {
+        this.failOutgoing(peerId, 'O PC remoto não voltou a tempo depois da troca de modo. Reconecte manualmente.');
+      }
+    }
   }
 
   toggleBlockLocalInput(): void {

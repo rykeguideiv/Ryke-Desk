@@ -12,6 +12,7 @@ import { Vigilancia } from '../../../shared/vigilancia';
 import type { Signaling } from './signaling';
 import type { Quality } from '../../../shared/config';
 import type { TipoCursor } from '../../../shared/protocol';
+import type { BotaoMouse } from '../../../shared/botoes';
 import { maiorQualidade, PERFIS_CAPTURA_SOFTWARE } from '../../../shared/qualidade-captura';
 import { PERFIS_QUALIDADE, ALTURA_MAX_AUTO, escalaParaAltura } from '../../../shared/qualidade-video';
 import type { Ponteiro } from '../../../shared/ponteiros';
@@ -845,7 +846,7 @@ export class Session {
   sendPonteiros(lista: Ponteiro[]): void {
     this.sendRapido({ t: 'ponteiros', lista });
   }
-  sendMouseButton(button: 0 | 1 | 2, down: boolean, x: number, y: number): void {
+  sendMouseButton(button: BotaoMouse, down: boolean, x: number, y: number): void {
     this.sendCtrl({ t: down ? 'md' : 'mu', b: button, x, y });
   }
   /** Modo Gamer: deslocamento relativo da mira (canal rápido, pode perder). */
@@ -863,7 +864,7 @@ export class Session {
     this.sendCtrl({ t: 'gamer', on });
   }
   /** Modo Gamer: clique sem reposicionar. Confiável — perder um tiro irrita. */
-  sendMouseRelButton(button: 0 | 1 | 2, down: boolean): void {
+  sendMouseRelButton(button: BotaoMouse, down: boolean): void {
     this.sendCtrl({ t: 'mrb', b: button, down });
   }
   sendWheel(dx: number, dy: number, x: number, y: number): void {
@@ -1401,8 +1402,46 @@ function perfilAtualDaCapturaSoftware() {
  * alguém pediu — capturar a 30 porque um deles está em "baixa" cortaria pela
  * metade a imagem de quem escolheu "alta" na mesma máquina.
  */
+/**
+ * A que taxa PEDIMOS a tela ao Windows.
+ *
+ * Este é o teto de tudo: o adaptador pode baixar os quadros quando a rede
+ * aperta, mas nunca inventar quadros que a fonte não entregou. Pedir 30 no modo
+ * automático — o padrão — condenava toda sessão a 30, mesmo numa rede direta de
+ * 11 ms com a GPU codificando por hardware e a banda sobrando.
+ *
+ * Agora automático e alta pedem 60, e quem decide o que cabe é o adaptador,
+ * medindo a rede de verdade. Média e baixa continuam em 30 de propósito: são
+ * escolhas explícitas de economia, e nelas o perfil já pede 30 no codificador.
+ */
 function quadrosDaCaptura(): number {
-  return qualidadeCompartilhada() === 'alta' ? 60 : 30;
+  const q = qualidadeCompartilhada();
+  return q === 'alta' || q === 'auto' ? 60 : 30;
+}
+
+let observandoAreaProtegida = false;
+
+/**
+ * Reergue a captura quando a área protegida do Windows (o UAC) sai da frente.
+ *
+ * O DEFEITO: clicar em algo que pede administrador congelava a sessão PARA
+ * SEMPRE. O Windows troca de área de trabalho, a captura para de entregar
+ * quadros — mas a trilha continua "viva", então o evento `ended`, que é quem
+ * manda recapturar, nunca dispara. E a vigilância da sessão via os dois lados
+ * parados e concluía, com razão pelas regras dela, que era só uma tela quieta.
+ * Ninguém reerguia nada, nem depois que o UAC saía.
+ *
+ * O processo principal pergunta ao Windows de quem é a área de entrada e avisa
+ * aqui. Ao voltar ao normal, trocamos a fonte por uma nova — é isso que faz a
+ * imagem voltar em vez de ficar parada até alguém reconectar na mão.
+ */
+function observarAreaProtegida(): void {
+  if (observandoAreaProtegida) return;
+  observandoAreaProtegida = true;
+  window.ryke.captura.onAreaProtegida((ativa) => {
+    if (ativa || consumidoresTela.size === 0) return;
+    void recapturarTelaCompartilhada();
+  });
 }
 
 function observarMonitores(): void {
@@ -1428,6 +1467,7 @@ function vigiarFimDaCaptura(stream: MediaStream): void {
 
 async function pegarTela(consumidor: ConsumidorTela): Promise<MediaStream> {
   observarMonitores();
+  observarAreaProtegida();
   consumidoresTela.add(consumidor);
   if (!telaCompartilhada) {
     try {

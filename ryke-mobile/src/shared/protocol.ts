@@ -269,7 +269,16 @@ export type CtrlMeta = {
  * ponteiro no meio do caminho não é um arrasto.
  */
 export type CtrlMouseMove = { t: 'mm'; x: number; y: number };
-export type CtrlMouseButton = { t: 'md' | 'mu'; b: 0 | 1 | 2; x: number; y: number };
+/**
+ * Qual botão, na numeração do DOM: 0 esquerdo · 1 meio · 2 direito ·
+ * 3 voltar · 4 avançar (os dois laterais, do polegar).
+ *
+ * A lista está repetida aqui, e não importada de `botoes.ts`, porque este
+ * arquivo é o CONTRATO DE REDE: ele não tem dependência nenhuma de propósito,
+ * já que é copiado inteiro para o projeto do celular.
+ */
+export type BotaoDoMouse = 0 | 1 | 2 | 3 | 4;
+export type CtrlMouseButton = { t: 'md' | 'mu'; b: BotaoDoMouse; x: number; y: number };
 export type CtrlWheel = { t: 'wheel'; dx: number; dy: number; x: number; y: number };
 
 /**
@@ -290,7 +299,7 @@ export type CtrlMouseRel = { t: 'mr'; dx: number; dy: number };
  * a posição atual da mira. Reaproveitar `md`/`mu`, que carregam coordenada,
  * faria o anfitrião teleportar o cursor antes de cada tiro.
  */
-export type CtrlMouseRelButton = { t: 'mrb'; b: 0 | 1 | 2; down: boolean };
+export type CtrlMouseRelButton = { t: 'mrb'; b: BotaoDoMouse; down: boolean };
 
 /**
  * "Entrei (ou saí) do Modo Gamer."

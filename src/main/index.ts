@@ -13,7 +13,7 @@ import { release } from 'node:os';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { appendFileSync, statSync, renameSync } from 'node:fs';
+import { appendFileSync, statSync, renameSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { isElevated, permitirArrastarArquivos } from './elevation';
 
 import { Store } from './store';
@@ -40,6 +40,12 @@ import type { Papel } from '../shared/config';
 import { SERVIDOR_PADRAO } from '../shared/servidor-padrao';
 import type { PerfilCapturaSoftware } from '../shared/qualidade-captura';
 import type { Ponteiro, TipoCursor } from '../shared/ponteiros';
+import type { BotaoMouse } from '../shared/botoes';
+import {
+  cursorAindaOndeDeixamos as aindaOndeDeixamos,
+  esperaDevolucaoMs as calcularEsperaDevolucao,
+  GRACA_INJECAO_MS,
+} from '../shared/emprestimo-cursor';
 
 // Lançado como SISTEMA por uma tarefa agendada, só para disparar o
 // Ctrl+Alt+Del (ver `enviarSas` em sas.ts). Faz a única coisa que precisa e sai
@@ -251,15 +257,27 @@ function comecarARelatarCursor(): void {
   relogioCursor = setInterval(() => {
     // (a) O cursor DESTE computador, para cada visitante desenhar a seta do
     // dono da máquina — a branca, sem cor, que não obedece a ninguém de fora.
-    const ponto = input.cursorPosition();
+    //
+    // ENQUANTO O CURSOR ESTÁ EMPRESTADO, a posição real é a do VISITANTE — foi
+    // fomos nós que o levamos até lá para poder clicar. Relatá-la fazia a seta
+    // SALTAR para cima da seta colorida a cada clique e acompanhá-la em cada
+    // rolagem: as duas setas viravam uma só, que é o defeito de "as setas se
+    // misturam". Durante o empréstimo a seta branca fica onde o dono a deixou,
+    // que é onde ela de fato pertence — o empréstimo é do cursor do Windows,
+    // não da seta da pessoa.
+    const emprestado = emprestimo && cursorAindaOndeDeixamos() ? emprestimo : null;
+    const ponto = emprestado ? emprestado.volta : input.cursorPosition();
     const fracao = ponto ? toFraction(captureDisplayId, ponto.x, ponto.y) : null;
     // Fora da tela capturada (outro monitor): não há onde desenhar.
-    if (fracao) {
+    if (fracao && ponto) {
       // A FORMA vai junto da posição: assim a seta do anfitrião que o visitante
       // desenha vira viga de texto, redimensionar ou mãozinha conforme o cursor
       // real de lá. Entra na marca para uma troca de forma sem mexer o cursor
       // (parado sobre um campo) também ser enviada.
-      const tipo = input.cursorShape();
+      // Emprestado, a forma do cursor REAL é a do lugar onde o visitante está
+      // clicando. A seta branca está desenhada noutro ponto: perguntamos a forma
+      // de LÁ, senão o desenho mente sobre o que há sob ela.
+      const tipo = emprestado ? input.cursorShapeAtPoint(ponto.x, ponto.y) : input.cursorShape();
       const marca = `${fracao.x.toFixed(4)},${fracao.y.toFixed(4)},${tipo}`;
       if (marca !== ultimoCursor) {
         ultimoCursor = marca;
@@ -279,6 +297,48 @@ function pararDeRelatarCursor(): void {
   if (relogioCursor === null) return;
   clearInterval(relogioCursor);
   relogioCursor = null;
+}
+
+// ── a área protegida do Windows (UAC) ─────────────────────────────
+//
+// O DEFEITO QUE ISTO CORRIGE: clicar em algo que pede administrador — um
+// instalador, por exemplo — fazia a sessão CONGELAR E NÃO VOLTAR MAIS. O
+// Windows troca para a área protegida, a captura para de entregar quadros e a
+// entrada injetada não chega a lugar nenhum.
+//
+// Nada disso disparava recuperação, e por dois motivos que se somavam:
+//   • a trilha de vídeo continua "viva", só que muda — então o evento `ended`,
+//     que é quem manda recapturar, nunca acontecia;
+//   • a vigilância da sessão via os DOIS lados parados e concluía, pela regra
+//     dela e com razão, que era só uma "tela quieta".
+//
+// Então ninguém reerguia a captura, nem quando o UAC saía da frente. Perguntar
+// ao Windows de quem é a área de entrada resolve os dois: dá para AVISAR quem
+// está do outro lado, em vez de deixar a tela morta sem explicação, e dá para
+// reerguer a captura no instante em que a área normal volta.
+const INTERVALO_AREA_PROTEGIDA_MS = 500;
+let relogioAreaProtegida: NodeJS.Timeout | null = null;
+let areaProtegidaAntes = false;
+
+function comecarAVigiarAreaProtegida(): void {
+  if (relogioAreaProtegida !== null) return;
+  areaProtegidaAntes = input.desktopSeguroAtivo();
+  relogioAreaProtegida = setInterval(() => {
+    const agora = input.desktopSeguroAtivo();
+    if (agora === areaProtegidaAntes) return;
+    areaProtegidaAntes = agora;
+    registrarDiag(
+      `[uac] área protegida ${agora ? 'ENTROU na frente' : 'saiu — reerguendo a captura'}`,
+    );
+    send('captura:areaProtegida', agora);
+  }, INTERVALO_AREA_PROTEGIDA_MS);
+}
+
+function pararDeVigiarAreaProtegida(): void {
+  if (relogioAreaProtegida === null) return;
+  clearInterval(relogioAreaProtegida);
+  relogioAreaProtegida = null;
+  areaProtegidaAntes = false;
 }
 
 // ──────────────────────── as setas da sessão ──────────────────────
@@ -402,13 +462,21 @@ function abrirCamadaDeSetas(): void {
     // segunda seta vermelha atrás da de cada visitante, e o programa passa a
     // parecer quebrado justamente no recurso que ele tem de diferente.
     if (!input.excluirDaCaptura(janela.getNativeWindowHandle())) {
-      console.error('[setas] o Windows recusou esconder a camada da captura — camada desativada');
-      camadaRecusada = true;
+      // GRAVADO em arquivo, e não só no console: este erro é a explicação de "a
+      // seta colorida não aparece na tela de quem está sendo acessado", e no
+      // console ele morre junto com a janela — ninguém nunca o vê. Sem isto o
+      // sintoma chega sem nenhuma pista do motivo.
+      //
+      // E NÃO desligamos mais a camada de vez: antes uma recusa única condenava
+      // a sessão inteira a ficar sem setas, mesmo que a tentativa seguinte fosse
+      // dar certo. Agora a próxima entrada de visitante tenta de novo.
+      registrarDiag('[setas] o Windows recusou esconder a camada — sem setas nesta tentativa');
       fecharCamadaDeSetas();
       send('setas:indisponivel');
       return;
     }
 
+    registrarDiag('[setas] camada de setas no ar');
     desenharSetas();
   });
 }
@@ -504,14 +572,47 @@ const botoesSegurados = new Map<string, Set<number>>();
 let emprestimo: { dono: string; volta: { x: number; y: number } } | null = null;
 /** O último ponto que NÓS injetamos — a régua para saber se alguém mexeu. */
 let ultimoInjetado: { x: number; y: number } | null = null;
+/** Quando injetamos aquele ponto. Ver `cursorAindaOndeDeixamos`. */
+let ultimoInjetadoEm = 0;
 let devolucaoAgendada: NodeJS.Timeout | null = null;
 
-/** Rolagem contínua não pode devolver o cursor entre um tique e o outro. */
-const ESPERA_DEVOLUCAO_MS = 400;
+/**
+ * O cursor ainda está onde NÓS o pusemos, ou a pessoa daqui pegou o mouse de
+ * volta? A decisão — inclusive a carência que conserta o "branco preso no
+ * vermelho" — mora em `shared/emprestimo-cursor`, onde o teste a cobre. Aqui
+ * só colhemos o estado do Windows.
+ */
+function cursorAindaOndeDeixamos(): boolean {
+  return aindaOndeDeixamos({
+    ultimoInjetado,
+    desdeAInjecaoMs: Date.now() - ultimoInjetadoEm,
+    lerPosicao: () => input.cursorPosition(),
+  });
+}
+
+/** A espera antes de devolver o cursor. Ver `shared/emprestimo-cursor`. */
+function esperaDevolucaoMs(): number {
+  return calcularEsperaDevolucao(input.doubleClickTime());
+}
+
+/**
+ * Onde o cursor do DONO está — o ponto que o empréstimo promete devolver.
+ *
+ * Logo depois de uma DEVOLUÇÃO o GetCursorPos ainda pode responder o ponto
+ * ANTIGO, que é justamente o do visitante. Guardar aquilo como "lugar do dono"
+ * faria a seta branca migrar de vez para cima da colorida a cada par de cliques
+ * seguidos — o mesmo defeito por outra porta. Dentro da carência vale o que nós
+ * mesmos acabamos de injetar, que é onde o cursor está indo parar.
+ */
+function posicaoDeRepouso(): { x: number; y: number } | null {
+  if (ultimoInjetado && Date.now() - ultimoInjetadoEm < GRACA_INJECAO_MS) return ultimoInjetado;
+  return input.cursorPosition();
+}
 
 function moverCursorReal(ponto: { x: number; y: number }): void {
   input.moveMouseTo(ponto.x, ponto.y);
   ultimoInjetado = ponto;
+  ultimoInjetadoEm = Date.now();
 }
 
 function pegarCursorEmprestado(peerId: string, ponto: { x: number; y: number }): void {
@@ -523,7 +624,7 @@ function pegarCursorEmprestado(peerId: string, ponto: { x: number; y: number }):
   // clicar no meio do clique do primeiro, o cursor ainda tem de voltar para
   // onde o dono da máquina o deixou — e não para onde o primeiro visitante
   // estava apontando.
-  if (!emprestimo) emprestimo = { dono: peerId, volta: input.cursorPosition() ?? ponto };
+  if (!emprestimo) emprestimo = { dono: peerId, volta: posicaoDeRepouso() ?? ponto };
   moverCursorReal(ponto);
 }
 
@@ -534,7 +635,7 @@ function devolverCursor(peerId: string, agora: boolean): void {
     devolucaoAgendada = setTimeout(() => {
       devolucaoAgendada = null;
       devolverCursor(peerId, true);
-    }, ESPERA_DEVOLUCAO_MS);
+    }, esperaDevolucaoMs());
     return;
   }
 
@@ -548,11 +649,7 @@ function devolverCursor(peerId: string, agora: boolean): void {
   // Se o cursor não está mais onde deixamos, quem o moveu foi a pessoa daqui —
   // com a mão dela, no mouse dela. Devolvê-lo ao ponto antigo arrancaria o
   // ponteiro da mão de quem está trabalhando, que é o defeito original.
-  const agoraOnde = input.cursorPosition();
-  if (agoraOnde && ultimoInjetado) {
-    const mexeram = Math.abs(agoraOnde.x - ultimoInjetado.x) > 2 || Math.abs(agoraOnde.y - ultimoInjetado.y) > 2;
-    if (mexeram) return;
-  }
+  if (!cursorAindaOndeDeixamos()) return;
   moverCursorReal(volta);
 }
 
@@ -622,6 +719,52 @@ function mostrarJanela(): void {
   mainWindow.focus();
 }
 
+
+// ── o passe de retorno da troca de modo ──────────────────────────
+//
+// Trocar para o modo administrador REABRE o programa. Numa conexão
+// supervisionada (sem senha salva), isso obrigava a pessoa daqui a autorizar
+// tudo de novo — mesmo tendo sido ELA quem pediu a troca, segundos antes. Uma
+// pergunta que não protege nada e só atrapalha: a resposta honesta a "posso
+// deixar entrar?" já tinha sido dada.
+//
+// O que este passe NÃO é: uma porta aberta. Ele vale apenas para os números
+// que JÁ ESTAVAM conectados no instante da troca, expira em dois minutos, e
+// cada número o usa UMA vez só — depois disso é apagado. Fora dessa janela,
+// tudo volta a passar pela autorização de sempre.
+const PASSE_VALIDO_MS = 120_000;
+
+function caminhoPasse(): string {
+  return join(app.getPath('userData'), 'ryke-passe-retorno.json');
+}
+
+function salvarPasseDeRetorno(peers: string[]): void {
+  if (peers.length === 0) return;
+  try {
+    writeFileSync(caminhoPasse(), JSON.stringify({ peers, expira: Date.now() + PASSE_VALIDO_MS }), 'utf8');
+    registrarDiag(`[passe] guardado para ${peers.length} visitante(s), válido por ${PASSE_VALIDO_MS / 1000}s`);
+  } catch (e) {
+    registrarDiag(`[passe] não deu para guardar: ${String(e)}`);
+  }
+}
+
+/** Vale para este número agora? Se valer, gasta o passe e devolve true. */
+function consumirPasseDeRetorno(peerId: string): boolean {
+  try {
+    const dados = JSON.parse(readFileSync(caminhoPasse(), 'utf8')) as { peers?: unknown; expira?: unknown };
+    const peers = Array.isArray(dados.peers) ? dados.peers.filter((p): p is string => typeof p === 'string') : [];
+    const expira = typeof dados.expira === 'number' ? dados.expira : 0;
+    if (Date.now() > expira || !peers.includes(peerId)) return false;
+    const restantes = peers.filter((p) => p !== peerId);
+    if (restantes.length === 0) rmSync(caminhoPasse(), { force: true });
+    else writeFileSync(caminhoPasse(), JSON.stringify({ peers: restantes, expira }), 'utf8');
+    registrarDiag(`[passe] usado por ${peerId} — entrou sem pedir autorização de novo`);
+    return true;
+  } catch {
+    // Sem arquivo, ilegível ou vencido: segue o caminho normal, pedindo.
+    return false;
+  }
+}
 /**
  * Reabre o Ryke Desk no OUTRO nível de privilégio.
  *
@@ -638,21 +781,126 @@ function mostrarJanela(): void {
  *   • para NORMAL: relança pelo explorer.exe, que "des-eleva" e devolve a captura
  *     rápida.
  *
- * Um lançador destacado espera este processo sair (soltando a trava de instância
- * única) antes de subir a outra cópia; sem essa espera, a nova bateria na trava.
+ * A nova cópia é subida pelo AGENDADOR DE TAREFAS (elevar) ou pelo EXPLORER
+ * (normal) — nenhum dos dois é filho deste processo, então a nova cópia sobrevive
+ * a este app morrer, aconteça o que acontecer com o lançador.
  */
-function trocarModo(elevado: boolean): void {
-  const exe = process.execPath;
-  const comando = elevado
-    ? 'ping 127.0.0.1 -n 4 >nul & schtasks /Run /TN "RykeDesk-Admin"'
-    : `ping 127.0.0.1 -n 4 >nul & explorer.exe "${exe}"`;
+/**
+ * Dispara um programa e conta o que aconteceu no diagnóstico.
+ *
+ * Argumentos em VETOR, e nunca uma linha de comando montada à mão: é o que
+ * conserta o "fecha e não reabre". A versão anterior montava um comando enorme
+ * numa string e o entregava ao `cmd /c`. O Node envolve esse argumento em
+ * aspas, e o cmd — que já tem as próprias regras para aspas dentro de aspas —
+ * se perdia com as aspas dos caminhos, SAÍA COM CÓDIGO 0 e não executava nada.
+ * Silenciosamente: nem o primeiro `echo` chegava a rodar, então nem no log
+ * ficava rastro. Chamando o executável direto, o Node entrega os argumentos ao
+ * Windows já separados e não existe string para o cmd interpretar errado.
+ */
+function lancar(programa: string, argumentos: string[], pronto: (ok: boolean) => void): void {
+  let respondeu = false;
+  const responder = (ok: boolean): void => {
+    if (respondeu) return;
+    respondeu = true;
+    pronto(ok);
+  };
   try {
-    spawn('cmd.exe', ['/c', comando], { detached: true, windowsHide: true, stdio: 'ignore' }).unref();
-  } catch {
-    /* se o lançador falhar, ao menos não deixamos o app num limbo */
+    const filho = spawn(programa, argumentos, {
+      detached: true,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let saida = '';
+    filho.stdout?.on('data', (d) => (saida += String(d)));
+    filho.stderr?.on('data', (d) => (saida += String(d)));
+    filho.on('error', (e) => {
+      registrarDiag(`[relanc] ${programa} não executou: ${String(e)}`);
+      responder(false);
+    });
+    filho.on('exit', (codigo) => {
+      const resumo = saida.trim().replace(/s+/g, ' ').slice(0, 200);
+      registrarDiag(`[relanc] ${programa} saiu=${codigo}${resumo ? ` — ${resumo}` : ''}`);
+      responder(codigo === 0);
+    });
+  } catch (e) {
+    registrarDiag(`[relanc] falha ao lançar ${programa}: ${String(e)}`);
+    responder(false);
   }
+}
+
+function trocarModo(elevado: boolean): void {
+  // COMO A NOVA CÓPIA SOBE — e por que ela sobrevive a este processo morrer.
+  //
+  // Quem a levanta é o AGENDADOR DE TAREFAS (elevar) ou o EXPLORER (voltar ao
+  // normal). Nenhum dos dois é filho deste app: a cópia nova nasce filha de um
+  // serviço do Windows, então continua de pé depois que saímos. Só precisamos
+  // manter este processo vivo pelo instante em que o pedido é feito — menos de
+  // um segundo — e por isso NÃO há espera nenhuma antes dele (uma espera dentro
+  // de um processo-filho morre junto com o app, que foi o defeito anterior).
   encerrando = true;
-  app.quit();
+  const windir = process.env.WINDIR ?? 'C:\Windows';
+  const system32 = join(windir, 'System32');
+  const exe = process.execPath;
+
+  registrarDiag(`[modo] troca solicitada -> ${elevado ? 'ELEVADO' : 'normal'}`);
+
+  // Quem já está conectado agora não vai precisar ser autorizado outra vez
+  // quando o programa voltar. Ver o passe de retorno, acima.
+  salvarPasseDeRetorno([...ponteiros.keys()]);
+
+  // Solta a trava de instância única AGORA (síncrono), antes de a nova cópia
+  // nascer. Assim, quando ela chamar requestSingleInstanceLock, a trava já está
+  // livre e ela sobe — em vez de desistir na hora e o app "não reabrir".
+  try {
+    app.releaseSingleInstanceLock();
+  } catch {
+    /* a rede de segurança abaixo ainda encerra o processo */
+  }
+
+  let saiu = false;
+  const encerrar = (): void => {
+    if (saiu) return;
+    saiu = true;
+    try {
+      app.exit(0);
+    } catch {
+      /* já saiu */
+    }
+  };
+  // Uma folga antes de sair: dá tempo de a cópia nova nascer e pegar a trava
+  // enquanto esta ainda está viva, o que torna a troca contínua.
+  const sairEmSeguida = (): void => {
+    setTimeout(encerrar, 600);
+  };
+
+  if (!elevado) {
+    // Lançar PELO explorer devolve o app ao nível normal do usuário (des-eleva),
+    // que é onde a captura por hardware funciona. Ver a descoberta da lentidão.
+    lancar(join(windir, 'explorer.exe'), [exe], sairEmSeguida);
+  } else {
+    // Elevado e SEM UAC: dispara a tarefa RL HIGHEST criada pelo instalador —
+    // numa sessão remota o UAC apareceria na área de trabalho segura, invisível
+    // para quem controla.
+    lancar(join(system32, 'schtasks.exe'), ['/Run', '/TN', 'RykeDesk-Admin'], (ok) => {
+      if (ok) {
+        sairEmSeguida();
+        return;
+      }
+      // A tarefa faltou ou falhou (instalação antiga, tarefa apagada à mão).
+      // O UAC é pior que nenhum prompt, mas garante que o app REABRE em vez de
+      // sumir — que é o defeito que não podemos deixar acontecer de novo.
+      registrarDiag('[modo] a tarefa falhou; caindo para o UAC');
+      lancar(
+        join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+        ['-NoProfile', '-NonInteractive', '-Command', `Start-Process -FilePath '${exe.replace(/'/g, "''")}' -Verb RunAs`],
+        sairEmSeguida,
+      );
+    });
+  }
+
+  // Rede de segurança: se nenhum retorno vier, saímos mesmo assim para não
+  // ficar num limbo com a janela fechada e o processo vivo.
+  setTimeout(encerrar, 10000);
 }
 
 /**
@@ -1347,7 +1595,7 @@ function registerIpc(): void {
    * clicar num lugar sem estar nele. Então levamos o cursor até a seta virtual,
    * clicamos, e no soltar do último botão ele volta para onde estava.
    */
-  ipcMain.on('input:button', (_e, peerId: string, button: 0 | 1 | 2, down: boolean, fx: number, fy: number) => {
+  ipcMain.on('input:button', (_e, peerId: string, button: BotaoMouse, down: boolean, fx: number, fy: number) => {
     // Move antes de clicar: um pacote de movimento perdido não pode fazer o
     // clique cair no lugar errado.
     const point = toPhysicalPoint(captureDisplayId, fx, fy);
@@ -1375,7 +1623,14 @@ function registerIpc(): void {
     // no ponto de origem, e um arrasto terminaria onde começou.
     input.mouseButton(button, false);
     segurados.delete(button);
-    if (segurados.size === 0) devolverCursor(peerId, true);
+    // A devolução é AGENDADA, e não imediata — é isto que faz o duplo clique
+    // funcionar. Devolvendo na hora, o cursor voltava para o dono entre o
+    // primeiro e o segundo clique e era trazido de novo: o Windows via um
+    // movimento no meio do par e entregava dois cliques soltos, nunca um duplo
+    // (e a seta ainda piscava de um lado para o outro). Como o segundo apertar
+    // cancela a devolução pendente, o par inteiro acontece parado no mesmo
+    // ponto, que é o que o Windows exige para reconhecer o duplo clique.
+    if (segurados.size === 0) devolverCursor(peerId, false);
   });
 
   /**
@@ -1404,7 +1659,7 @@ function registerIpc(): void {
     // ponteiro caminha até a borda e a câmera para de girar ali.
     if (emModoGamer.has(peerId)) recentralizarParaOJogo();
   });
-  ipcMain.on('input:buttonRel', (_e, button: 0 | 1 | 2, down: boolean) => input.mouseButton(button, down));
+  ipcMain.on('input:buttonRel', (_e, button: BotaoMouse, down: boolean) => input.mouseButton(button, down));
 
   /**
    * A roda também precisa do cursor: o Windows rola a janela que está embaixo
@@ -1421,6 +1676,8 @@ function registerIpc(): void {
     input.mouseWheel(dx, dy);
     if (!segurandoBotao(peerId)) devolverCursor(peerId, false);
   });
+  ipcMain.handle('passe:consumir', (_e, peerId: string) => consumirPasseDeRetorno(peerId));
+
   ipcMain.on('input:key', (_e, code: string, down: boolean) => input.key(code, down));
   ipcMain.on('input:combo', (_e, codes: string[]) => input.combo(codes));
 
@@ -1668,8 +1925,10 @@ function registerIpc(): void {
     send('senha:travada', visitantesConectados > 0);
     if (visitantesConectados > 0) {
       comecarARelatarCursor();
+      comecarAVigiarAreaProtegida();
     } else {
       pararDeRelatarCursor();
+      pararDeVigiarAreaProtegida();
       // Sem ninguém conectado não há seta para desenhar, e uma janela sempre
       // no topo cobrindo a tela inteira não é coisa que se deixe aberta "por
       // via das dúvidas".
