@@ -1,7 +1,45 @@
 # O que falta
 
-Ordem pensada para que cada passo possa ser testado sozinho, sem depender do
-seguinte. Nada disto é chamado pelo aplicativo até estar pronto.
+> **Atualizado.** O motor nativo existe e foi medido — ver `motor/LEIA-ME.md`.
+> Uma sessão real de acesso remoto já roda ponta a ponta em C++, com captura
+> DXGI, H.264 por hardware, transporte próprio sobre UDP (sem WebRTC), cifra
+> AES-256-GCM, injeção de mouse e teclado, e desenho por Direct3D. O que segue
+> abaixo é o que ainda NÃO existe nele.
+
+## Pronto e medido
+
+- [x] Captura por Desktop Duplication (DXGI).
+- [x] Codificador H.264 por hardware (NVENC/Quick Sync/VCE via Media Foundation),
+      em modo de baixa latência, sem quadros B.
+- [x] Decodificador H.264 (hoje cai para software — falta DXVA).
+- [x] Conversão BGRA→NV12 multinúcleo: 2,6 ms a 1080p.
+- [x] Transporte próprio: fragmentação, retransmissão seletiva com prazo,
+      ritmo de envio, controle de banda, medição de ida e volta.
+- [x] Cifra: ECDH P-256 + senha, AES-256-GCM por pacote, anti-repetição.
+- [x] Injeção de mouse (cinco botões, roda nos dois eixos, arrasto com máscara
+      de botões) e teclado por posição física.
+- [x] Janela Win32 e desenho por Direct3D 11, com proporção preservada.
+- [x] Três provas automáticas: `prova-cripto`, `prova-transporte`, `prova-codec`.
+
+## O que falta no motor, em ordem de valor
+
+1. **Decodificação por DXVA.** Hoje o decodificador é software e consome 6 ms
+   por quadro no visitante — é o maior item de atraso que sobrou. Exige ligar o
+   MFT a um `IMFDXGIDeviceManager` e receber a saída como textura, o que de
+   quebra elimina a cópia até a tela.
+2. **Captura sem descer para a memória.** Hoje o quadro sai da GPU para a RAM
+   (duas cópias) e volta. O caminho certo é DXGI → VideoProcessor (BGRA→NV12 na
+   GPU) → codificador, sem o quadro nunca sair de lá. Elimina os 2,6 ms de
+   conversão e boa parte dos 4,8 ms de captura.
+3. **Número Ryke e encontro.** Hoje é `endereço:porta` — rede local ou porta
+   liberada. Falta a malha que o aplicativo atual já tem.
+4. **Rodar como SISTEMA**, que é o motivo original deste projeto: capturar e
+   injetar na área de trabalho protegida do UAC. Ver `src/win32.ts`, que planeja
+   o serviço e nunca foi executado.
+5. Área de transferência, transferência de arquivos, vários visitantes com setas
+   coloridas, Modo Gamer, Ctrl+Alt+Del.
+6. A interface completa do 1.0.43.
+7. Instalador e assinatura.
 
 ## 0. Assinar o código — virou pré-requisito, não enfeite
 
