@@ -1,0 +1,7 @@
+# O que o compilador produz. Reconstruído por COMPILAR.cmd em segundos.
+build/
+obj/
+*.exe
+*.obj
+*.pdb
+*.ilk
