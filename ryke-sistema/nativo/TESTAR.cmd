@@ -1,14 +1,14 @@
 @echo off
 rem  Duplo clique aqui para MEDIR a captura nativa nesta maquina.
 rem
-rem  Nao e o Ryke Desk. E a prova de um componente: ele abre a tela pela
-rem  Desktop Duplication API, captura por 5 segundos e diz quantos quadros por
-rem  segundo conseguiu. Uma janela colorida aparece durante a medida, so para
-rem  dar o que capturar — sem ela a tela ficaria parada e o resultado seria
-rem  zero quadros, o que nao provaria nada.
+rem  O resultado e GRAVADO em resultado.txt e aberto no Bloco de Notas — antes
+rem  ele so aparecia na janela preta, de onde copiar texto exige clicar com o
+rem  botao direito e marcar a selecao. Quem quer mandar o resultado nao deveria
+rem  precisar saber disso.
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+set "SAIDA=%~dp0resultado.txt"
 
 echo.
 echo  == Prova da captura nativa (Desktop Duplication) ==
@@ -36,8 +36,19 @@ timeout /t 2 /nobreak >nul
 
 echo  Medindo...
 echo.
-node prova.cjs
+
+rem  Grava e mostra ao mesmo tempo: a janela serve para acompanhar, o arquivo
+rem  para copiar e mandar.
+> "%SAIDA%" (
+  echo == Prova da captura nativa do Ryke Desk ==
+  echo Data: %DATE% %TIME%
+  echo Maquina: %COMPUTERNAME%
+  echo.
+)
+node prova.cjs >> "%SAIDA%" 2>&1
 set CODIGO=%ERRORLEVEL%
+
+type "%SAIDA%"
 
 echo.
 if "%CODIGO%"=="0" (
@@ -48,7 +59,11 @@ if "%CODIGO%"=="0" (
   echo   usa hoje cai para 1 quadro por segundo. Esta aqui nao cai.
   echo  ------------------------------------------------------------
 ) else (
-  echo  A prova falhou. A saida acima diz o motivo.
+  echo  A prova falhou. O motivo esta acima e no arquivo.
 )
+echo.
+echo  Resultado salvo em: %SAIDA%
+echo  Abrindo no Bloco de Notas para voce copiar ^(Ctrl+A, Ctrl+C^)...
+start "" notepad "%SAIDA%"
 echo.
 pause

@@ -7,3 +7,10 @@ node_modules/
 # A janela animada existe só para dar o que capturar durante a medida.
 # Não é parte do produto, mas fica versionada de propósito: sem ela a prova
 # mede uma tela parada e conclui, errado, que a captura não funciona.
+
+# Os artefatos do demo nativo. O .cmd recompila em segundos quando falta.
+demo/obj/
+demo/*.exe
+demo/*.ilk
+demo/*.pdb
+resultado.txt

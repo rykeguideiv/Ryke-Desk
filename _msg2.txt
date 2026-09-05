@@ -1,0 +1,33 @@
+Demo nativo: um .exe que mostra a captura funcionando, e o resultado copiavel
+
+O QUE ELE E
+
+RykeCaptura-Demo.exe, 246 KB, C++ puro. Uma janela que captura esta tela pela
+Desktop Duplication e desenha o resultado, com as taxas no titulo. Nao acessa
+maquina nenhuma — existe para responder com o olho, e nao com um relatorio, se
+a captura nativa acompanha a tela e se ela sobrevive a elevacao.
+
+O TESTE QUE ELE PERMITE: abrir normalmente, anotar a taxa, e depois abrir com
+"Executar como administrador" e comparar. A captura do Chromium, que o app usa
+hoje, cai para 1 quadro por segundo quando elevada.
+
+DUAS TAXAS, E NAO UMA
+
+A primeira versao redesenhava a cada quadro capturado e mostrava ~32 q/s —
+enquanto a prova pura media 57,7. A diferenca nao era da captura: era o
+StretchDIBits escalando 1920x1080 no processador. O demo estava medindo o
+proprio desenho e chamando aquilo de taxa de captura.
+
+Agora o laco captura o mais rapido que da e so redesenha ~30 vezes por segundo.
+O titulo mostra os dois numeros separados, porque esconder um deles daria a
+entender que a captura e mais lenta do que e. Medido depois da correcao:
+captura 50 q/s, previa 21 q/s.
+
+O RESULTADO PASSOU A SER COPIAVEL
+
+O TESTAR.cmd so escrevia na janela preta, de onde copiar texto exige clicar com
+o botao direito e marcar a selecao. Quem quer mandar o resultado nao deveria
+precisar saber disso. Agora ele grava em resultado.txt e abre no Bloco de
+Notas.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
