@@ -69,6 +69,14 @@ export type LiveStats = {
 
 export type SessionEvents = {
   stream: (stream: MediaStream) => void;
+  /**
+   * "O seu clique não chegou: ali é uma janela de administrador."
+   *
+   * Sem isto o clique some em silêncio — o Windows descarta a entrada de um
+   * processo comum numa janela elevada — e a sessão parece travada. Vem em
+   * fração da tela, para a marca aparecer exatamente onde a pessoa clicou.
+   */
+  precisaAdmin: (ponto: { x: number; y: number }) => void;
   stats: (stats: LiveStats) => void;
   /** Geometria e monitores do anfitrião, recebidos pelo visitante. */
   meta: (meta: Extract<CtrlMessage, { t: 'meta' }>) => void;
@@ -202,6 +210,7 @@ export class Session {
 
   private listeners: { [K in keyof SessionEvents]: SessionEvents[K][] } = {
     stream: [], stats: [], meta: [], cursor: [], formaPropria: [], cor: [], ponteiros: [], installer: [], sas: [],
+    precisaAdmin: [],
     transfers: [], closed: [], ready: [], saude: [],
   };
 
@@ -594,6 +603,9 @@ export class Session {
       case 'block-input':
         await window.ryke.input.blockLocal(msg.on);
         break;
+      case 'precisaAdmin':
+        this.emit('precisaAdmin', { x: msg.x, y: msg.y });
+        break;
       case 'admin':
         // O visitante mandou o anfitrião trocar de modo. Reabre o processo do
         // anfitrião elevado (sem UAC, via tarefa) ou normal. A sessão cai; o
@@ -602,6 +614,11 @@ export class Session {
         else await window.ryke.modo.normal();
         break;
     }
+  }
+
+  /** Anfitrião: conta ao visitante que aquele clique não podia acontecer. */
+  avisarPrecisaAdmin(x: number, y: number): void {
+    this.sendCtrl({ t: 'precisaAdmin', x, y });
   }
 
   /** Visitante: pede ao anfitrião para entrar/sair do modo administrador. */

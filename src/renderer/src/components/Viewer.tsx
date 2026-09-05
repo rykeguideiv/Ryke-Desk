@@ -548,6 +548,13 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   // atraso da imagem, e ver o ponteiro responder meio segundo depois da mão
   // torna qualquer trabalho fino insuportável.
   const marcaRef = useRef<HTMLDivElement>(null);
+  /**
+   * "Aquele clique não chegou: ali é uma janela de administrador."
+   *
+   * Sai de cena sozinho. Um aviso que fica na tela vira sujeira; o que ele
+   * precisa é aparecer no instante do clique, onde a pessoa clicou, e sumir.
+   */
+  const [avisoAdmin, setAvisoAdmin] = useState<{ x: number; y: number; id: number } | null>(null);
   const cursorRemoto = useRef<Fraction>({ x: 0.5, y: 0.5 });
   /**
    * A forma da seta do ANFITRIÃO (viga de texto, redimensionar, mãozinha…).
@@ -623,6 +630,12 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
   }, [ondeNaTela]);
 
   useEffect(() => {
+    if (!avisoAdmin) return;
+    const relogio = window.setTimeout(() => setAvisoAdmin(null), 2600);
+    return () => window.clearTimeout(relogio);
+  }, [avisoAdmin]);
+
+  useEffect(() => {
     if (!session) return;
     const soltas = [
       session.on('cursor', (ponto) => {
@@ -634,6 +647,10 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         }
         posicionarMarca();
       }),
+      // O clique caiu numa janela elevada e o Windows o descartou. Sem este
+      // aviso a sessão parece travada — foi o que acontecia ao clicar em
+      // "Concluir" num instalador, que cobre a tela e nunca fecha.
+      session.on('precisaAdmin', (ponto) => setAvisoAdmin({ ...ponto, id: Date.now() })),
       // A SUA seta: o anfitrião diz que forma o cursor teria onde você aponta.
       session.on('formaPropria', (tipo) => setMinhaForma(tipo)),
       session.on('cor', (cor) => {
@@ -1089,6 +1106,28 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
         />
         <span>{outgoing.meta?.hostName ?? 'computador remoto'}</span>
       </div>
+
+      {/* A marca de "não deu para clicar aqui". Fica exatamente sob o ponto
+          clicado, porque é a única forma de a pessoa ligar o aviso ao botão que
+          ela tentou apertar. */}
+      {avisoAdmin &&
+        (() => {
+          const onde = ondeNaTela(avisoAdmin);
+          if (!onde) return null;
+          return (
+            <div
+              key={avisoAdmin.id}
+              className="aviso-admin"
+              style={{ transform: `translate(${onde.x}px, ${onde.y}px)` }}
+              role="status"
+            >
+              <span className="aviso-admin-x" aria-hidden="true">
+                ✕
+              </span>
+              <span>Esta janela exige o modo administrador</span>
+            </div>
+          );
+        })()}
 
       {/* As setas das OUTRAS pessoas conectadas a este mesmo computador, cada
           uma na cor que o anfitrião lhe deu e com o nome dela embaixo. O SVG

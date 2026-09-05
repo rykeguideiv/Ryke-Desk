@@ -194,6 +194,8 @@ export class Controller {
    * recusar.
    */
   private hostSessions = new Map<string, Session>();
+  /** O ouvinte do aviso é registrado uma vez só, e não a cada sessão. */
+  private ouvindoPrecisaAdmin = false;
   /**
    * A cor da seta de cada visitante — 0 = vermelho, 1 = azul, 2 = verde.
    *
@@ -1125,6 +1127,16 @@ export class Controller {
     // A seta deste visitante: a primeira cor livre e um nome que caiba embaixo
     // dela. O processo principal já pode desenhá-la — ela nasce no meio da
     // tela e o primeiro movimento a leva para o lugar certo.
+    // O processo principal descobre que um clique caiu numa janela elevada e
+    // avisa aqui; daqui o recado vai ao visitante, que desenha a marca. É o que
+    // transforma "a sessão travou" em "esta janela precisa de administrador".
+    if (!this.ouvindoPrecisaAdmin) {
+      this.ouvindoPrecisaAdmin = true;
+      window.ryke.captura.onPrecisaAdmin(({ peerId: alvo, x, y }) => {
+        this.hostSessions.get(alvo)?.avisarPrecisaAdmin(x, y);
+      });
+    }
+
     const cor = proximaCorLivre(this.coresDeVisitantes.values());
     this.coresDeVisitantes.set(peerId, cor);
     const nomeDaSeta = this.nomeDaSeta(peerId);

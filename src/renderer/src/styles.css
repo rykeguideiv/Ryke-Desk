@@ -2760,3 +2760,69 @@ button {
   width: 14px;
   height: 14px;
 }
+
+/* ── "aqui o clique não chega" ─────────────────────────────────────
+ *
+ * Aparece sob o ponto clicado quando a janela de lá é de administrador e o
+ * modo administrador está desligado. O Windows descarta esses cliques em
+ * silêncio, e sem esta marca a sessão parece travada — foi o que acontecia ao
+ * tentar clicar em "Concluir" num instalador, que cobre a tela e nunca fecha.
+ *
+ * Não intercepta o mouse (pointer-events: none): ela avisa sobre um clique, e
+ * não pode atrapalhar o próximo. */
+.aviso-admin {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px 6px 7px;
+  border-radius: 8px;
+  background: rgba(24, 6, 6, 0.92);
+  border: 1px solid rgba(255, 90, 90, 0.55);
+  color: #ffdede;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  /* Nasce no ponto exato do clique e sobe um pouco, para não ficar debaixo do
+   * próprio ponteiro de quem clicou. */
+  margin-top: -34px;
+  margin-left: 6px;
+  /* A animação mexe SÓ na opacidade. O `transform` carrega a posição do clique,
+   * vinda do estilo em linha — e uma animação que tocasse nele sobrescreveria
+   * essa posição, jogando a marca para o canto da tela. */
+  animation: aviso-admin-entra 2.6s ease-out forwards;
+}
+
+.aviso-admin-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #e03131;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+@keyframes aviso-admin-entra {
+  0% {
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

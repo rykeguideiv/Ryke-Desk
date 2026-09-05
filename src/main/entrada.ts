@@ -33,6 +33,7 @@ export const doubleClickTime = input.doubleClickTime;
 export const excluirDaCaptura = input.excluirDaCaptura;
 export const isLocalInputBlocked = input.isLocalInputBlocked;
 export const verifyAbi = input.verifyAbi;
+export const janelaExigeAdmin = input.janelaExigeAdmin;
 export const getVirtualScreen = input.getVirtualScreen;
 
 /** O modo administrador está de fato ativo — ou seja, há ajudante ouvindo? */

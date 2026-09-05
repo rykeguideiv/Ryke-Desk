@@ -117,5 +117,86 @@ check('o preload expõe o passe', /passe: \{/.test(preload));
 check('e o visitante entra por ele, sem nova autorização', controlador.includes('await window.ryke.passe.consumir(from)'));
 check('sem passe, o pedido de autorização continua de pé', controlador.includes("return this.pedirAutorizacao(from, 'pedido');"));
 
+// ── CLIQUE EM JANELA ELEVADA: avisar, em vez de sumir em silêncio ──
+//
+// O DEFEITO: sem modo administrador, clicar em "Concluir" no instalador fazia
+// a sessão parecer TRAVADA. A janela do instalador é elevada, o Windows
+// descarta em silêncio a entrada vinda de um processo comum (é a UIPI), e como
+// ela cobre a tela e nunca fecha, nada mais parece responder. Só entrar em
+// modo administrador resolvia — e ninguém tinha como adivinhar isso.
+//
+// As checagens aqui usam comparação de texto, e não expressão regular, de
+// propósito: uma regex mal escapada passa a valer para qualquer coisa e o
+// teste vira enfeite que nunca falha.
+const entradaFonte = ler('src', 'main', 'input.ts');
+const roteador = ler('src', 'main', 'entrada.ts');
+const protocolo = ler('src', 'shared', 'protocol.ts');
+const estilos = ler('src', 'renderer', 'src', 'styles.css');
+const sessao = ler('src', 'renderer', 'src', 'lib', 'session.ts');
+
+check('existe como saber se a janela sob o ponto exige administrador',
+  entradaFonte.includes('export function janelaExigeAdmin'));
+// UM ERRO QUE JÁ FOI COMETIDO, E QUE ESTE TESTE IMPEDE DE VOLTAR.
+//
+// A primeira versão DEDUZIA: supunha que um processo comum não conseguiria
+// ler o token de um elevado, e tratava a recusa como resposta. A suposição
+// era falsa — com PROCESS_QUERY_LIMITED_INFORMATION o Windows deixa ler o
+// token de um processo elevado sem reclamar. Testado contra uma janela real
+// do Editor do Registro: "token lido", e a detecção respondia "pode clicar"
+// justamente onde o clique não passa.
+//
+// A correção é PERGUNTAR, e não deduzir.
+check('pergunta TokenElevation, em vez de deduzir por uma recusa',
+  entradaFonte.includes('TOKEN_ELEVATION = 20') &&
+    entradaFonte.includes('GetTokenInformationFn(token[0], TOKEN_ELEVATION, buf, 4, usado)'));
+check('e a resposta é o valor lido, não o sucesso da chamada',
+  entradaFonte.includes('return buf.readUInt32LE(0) !== 0;'));
+check('abre o processo para consulta limitada, que é o que basta',
+  entradaFonte.includes('OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid[0])'));
+// Já elevados, alcançamos qualquer janela: não há o que recusar.
+check('estando elevados, nada é recusado', entradaFonte.includes('if (isElevated()) return false;'));
+check('as alças do processo e do token são fechadas',
+  entradaFonte.includes('CloseHandle(token[0])') && entradaFonte.includes('CloseHandle(processo)'));
+// Um falso alarme recusaria cliques legítimos, que é pior do que perder um.
+const catchSeguro = [
+  '  } catch {',
+  '    return false;',
+  '  } finally {',
+].join('\n');
+check('na dúvida assume que DÁ para clicar', entradaFonte.includes(catchSeguro));
+check('o roteador reexporta a checagem',
+  roteador.includes('export const janelaExigeAdmin = input.janelaExigeAdmin'));
+
+check('o clique é recusado quando a janela exige admin e o modo está desligado',
+  principal.includes('if (down && !ajudanteConectado() && input.janelaExigeAdmin'));
+// Puxar o cursor real para dentro de uma janela onde não se pode clicar só
+// aumentaria a confusão: a recusa acontece ANTES de mexer em qualquer coisa.
+const trechoBotao = principal.slice(principal.indexOf("ipcMain.on('input:button'"));
+const recusa = trechoBotao.indexOf('avisarPrecisaAdmin');
+const emprestimo = trechoBotao.indexOf('pegarCursorEmprestado');
+check('e recusado ANTES de emprestar o cursor',
+  recusa >= 0 && emprestimo >= 0 && recusa < emprestimo);
+check('o aviso tem limite de repetição',
+  principal.includes('ultimoAvisoAdmin.get(peerId) ?? 0) < 1500'));
+check('a recusa fica registrada no diagnóstico',
+  principal.includes('[entrada] clique recusado'));
+
+check('o contrato de rede carrega o aviso',
+  protocolo.includes("CtrlPrecisaAdmin = { t: 'precisaAdmin'"));
+check('o anfitrião envia o aviso ao visitante',
+  sessao.includes('avisarPrecisaAdmin(x: number, y: number)'));
+check('o visitante recebe e emite o evento', sessao.includes("case 'precisaAdmin':"));
+check('o visitante desenha a marca no ponto clicado', viewer.includes('className="aviso-admin"'));
+check('com o "x" e a explicação',
+  viewer.includes('aviso-admin-x') && viewer.includes('exige o modo administrador'));
+check('e ela some sozinha', viewer.includes('setAvisoAdmin(null), 2600'));
+
+// A posição do clique vive no `transform` em linha. Se a animação tocasse em
+// transform, ela o sobrescreveria e jogaria a marca para o canto da tela.
+const quadros = estilos.slice(estilos.indexOf('@keyframes aviso-admin-entra'));
+check('a animação mexe só na opacidade, nunca no transform',
+  quadros.length > 0 && !quadros.includes('transform'));
+check('a marca não intercepta o mouse', estilos.includes('pointer-events: none'));
+
 console.log(falhas === 0 ? '\nModo administrador validado.\n' : `\n${falhas} falha(s).\n`);
 process.exit(falhas === 0 ? 0 : 1);

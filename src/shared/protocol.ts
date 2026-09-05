@@ -356,6 +356,21 @@ export type CtrlRunInstallerResult = { t: 'run-installer-result'; ok: boolean; c
  * isso é um modo temporário, para a tarefa e volta.
  */
 export type CtrlAdmin = { t: 'admin'; ligar: boolean };
+
+/**
+ * "Este clique não chegou: a janela ali exige administrador."
+ *
+ * O anfitrião manda isto quando descobre que o ponto clicado pertence a uma
+ * janela elevada e o modo administrador está desligado. Sem este aviso, o
+ * clique some em silêncio — o Windows descarta a entrada de um processo comum
+ * numa janela elevada — e a sessão PARECE travada. Foi exatamente o que
+ * acontecia ao tentar clicar em "Concluir" num instalador: a janela cobre a
+ * tela, não fecha nunca, e nada do que se clica funciona.
+ *
+ * A posição vem em fração da tela, como todo o resto, para o visitante
+ * desenhar a marca no lugar exato onde ele clicou.
+ */
+export type CtrlPrecisaAdmin = { t: 'precisaAdmin'; x: number; y: number };
 export type CtrlQuality = { t: 'quality'; preset: 'auto' | 'baixa' | 'media' | 'alta' };
 export type CtrlBlockInput = { t: 'block-input'; on: boolean };
 export type CtrlPing = { t: 'ping'; at: number };
@@ -468,6 +483,7 @@ export type CtrlMessage =
   | CtrlRunInstaller
   | CtrlRunInstallerResult
   | CtrlAdmin
+  | CtrlPrecisaAdmin
   | CtrlQuality
   | CtrlBlockInput
   | CtrlPing

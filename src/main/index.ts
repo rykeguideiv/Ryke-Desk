@@ -1638,6 +1638,22 @@ function registerIpc(): void {
     if (segurandoBotao(peerId)) moverCursorReal(point);
   });
 
+/**
+   * Avisa o visitante de que o clique dele não chegou — e por quê.
+   *
+   * Com limite de um aviso por segundo e meio: quem clica num botão que não
+   * responde clica de novo, e de novo, e encher a tela dele de marcas seria
+   * trocar um problema por outro.
+   */
+  const ultimoAvisoAdmin = new Map<string, number>();
+  const avisarPrecisaAdmin = (peerId: string, fx: number, fy: number): void => {
+    const agora = Date.now();
+    if (agora - (ultimoAvisoAdmin.get(peerId) ?? 0) < 1500) return;
+    ultimoAvisoAdmin.set(peerId, agora);
+    registrarDiag('[entrada] clique recusado: a janela sob o ponto exige administrador');
+    send('entrada:precisaAdmin', { peerId, x: fx, y: fy });
+  };
+
   /**
    * Clique: o único momento em que o cursor real é emprestado.
    *
@@ -1649,6 +1665,18 @@ function registerIpc(): void {
     // Move antes de clicar: um pacote de movimento perdido não pode fazer o
     // clique cair no lugar errado.
     const point = toPhysicalPoint(captureDisplayId, fx, fy);
+
+    // A JANELA ALI ACEITA A NOSSA ENTRADA?
+    //
+    // Se ela for elevada e nós não, o Windows descarta o clique em silêncio — e
+    // a sessão parece travada, porque a janela não responde e não sai da
+    // frente. Era o que acontecia ao clicar em "Concluir" num instalador. Em
+    // vez de injetar no vazio, avisamos e não mexemos no cursor: puxá-lo para
+    // dentro de uma janela onde não podemos clicar só piora a confusão.
+    if (down && !ajudanteConectado() && input.janelaExigeAdmin(point.x, point.y)) {
+      avisarPrecisaAdmin(peerId, fx, fy);
+      return;
+    }
     if (!setasIndependentes()) {
       input.moveMouseTo(point.x, point.y);
       input.mouseButton(button, down);

@@ -331,6 +331,9 @@ const api = {
    */
   captura: {
     onAreaProtegida: (fn: (ativa: boolean) => void) => subscribe('captura:areaProtegida', fn),
+    /** Um clique foi recusado porque a janela sob ele exige administrador. */
+    onPrecisaAdmin: (fn: (info: { peerId: string; x: number; y: number }) => void) =>
+      subscribe('entrada:precisaAdmin', fn),
   },
 
   ponteiros: {

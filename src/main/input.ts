@@ -15,6 +15,8 @@
 import koffi from 'koffi';
 import { mudarBotao, type BotaoMouse } from '../shared/botoes';
 import { lookupScan, VIRTUAL_KEYS, MODIFIER_CODES } from '../shared/keymap';
+// Sem ciclo: o elevation.ts não importa este módulo.
+import { isElevated } from './elevation';
 import type { TipoCursor } from '../shared/protocol';
 
 // ── tipos Win32 ───────────────────────────────────────────────────
@@ -81,6 +83,42 @@ const CURSORINFO_SIZE = koffi.sizeof(CURSORINFO);
 const GetCursorInfo = user32.func('int __stdcall GetCursorInfo(_Inout_ CURSORINFO *pci)');
 const LoadCursorW = user32.func('uintptr __stdcall LoadCursorW(uintptr hInstance, uintptr lpCursorName)');
 const WindowFromPoint = user32.func('uintptr __stdcall WindowFromPoint(POINT Point)');
+
+// ── a janela sob o ponto exige administrador? ─────────────────────
+//
+// O DEFEITO QUE ISTO EXPLICA. Instalar um programa no computador remoto sem
+// estar em modo administrador dava a impressão de que a sessão tinha travado:
+// a janela do instalador é ELEVADA, o Windows descarta em silêncio a entrada
+// que vem de um processo comum (é a UIPI), e o clique em "Concluir"
+// simplesmente não acontece. Como o instalador cobre a tela e não fecha nunca,
+// tudo parece congelado — quando na verdade só os cliques daquela janela estão
+// sendo ignorados.
+//
+// Não dá para injetar ali sem privilégio, e não deveria mesmo dar. Mas dá para
+// SABER e avisar, em vez de deixar a pessoa clicando no vazio.
+//
+// COMO SE DESCOBRE: o processo dono da janela é aberto e pedimos o token dele.
+// Um processo de integridade mais baixa recebe "acesso negado" ao ler o token
+// de um mais alto — e é essa recusa, e não uma comparação de números, que
+// responde exatamente à pergunta que importa: "consigo mexer com esta janela?"
+const kernel32 = koffi.load('kernel32.dll');
+const advapi32 = koffi.load('advapi32.dll');
+const GetWindowThreadProcessId = user32.func(
+  'uint32 __stdcall GetWindowThreadProcessId(uintptr hWnd, _Out_ uint32 *lpdwProcessId)',
+);
+const OpenProcess = kernel32.func('uintptr __stdcall OpenProcess(uint32 dwDesiredAccess, int bInheritHandle, uint32 dwProcessId)');
+const CloseHandle = kernel32.func('int __stdcall CloseHandle(uintptr hObject)');
+const OpenProcessTokenFn = advapi32.func(
+  'int __stdcall OpenProcessToken(uintptr ProcessHandle, uint32 DesiredAccess, _Out_ uintptr *TokenHandle)',
+);
+const GetTokenInformationFn = advapi32.func(
+  'int __stdcall GetTokenInformation(uintptr TokenHandle, int TokenInformationClass,' +
+    ' _Out_ void *TokenInformation, uint32 TokenInformationLength, _Out_ uint32 *ReturnLength)',
+);
+const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+const TOKEN_QUERY_ACESSO = 0x0008;
+/** TokenElevation — responde "este processo está elevado?" com um número. */
+const TOKEN_ELEVATION = 20;
 
 // ── a área protegida do Windows (UAC e tela bloqueada) ────────────
 //
@@ -196,6 +234,66 @@ export function cursorShapeAtPoint(x: number, y: number): TipoCursor {
     return tabela.get(String(hcur)) ?? 'default';
   } catch {
     return 'default';
+  }
+}
+
+/**
+ * A janela sob este ponto está acima do nosso alcance?
+ *
+ * `true` significa: por mais que injetemos, o Windows vai descartar. É o que
+ * distingue "o clique não fez nada porque o programa ignorou" de "o clique nem
+ * chegou lá" — e é a diferença entre a pessoa achar que a sessão travou e ela
+ * saber que precisa do modo administrador.
+ *
+ * Na dúvida devolve `false`: um falso alarme faria o programa recusar cliques
+ * legítimos, que é bem pior do que deixar um clique se perder.
+ *
+ * @param x,y pixels físicos da área de trabalho virtual.
+ */
+export function janelaExigeAdmin(x: number, y: number): boolean {
+  // Nós já somos elevados? Então alcançamos qualquer janela, e não há o que
+  // recusar. (O ajudante elevado cobre este caso pelo outro lado.)
+  if (isElevated()) return false;
+
+  let processo: number | bigint = 0;
+  let token: (number | bigint)[] = [0];
+  try {
+    const hwnd = WindowFromPoint({ x: Math.round(x), y: Math.round(y) });
+    if (!hwnd) return false;
+
+    const pid: number[] = [0];
+    GetWindowThreadProcessId(hwnd, pid);
+    if (!pid[0]) return false;
+
+    processo = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid[0]);
+    // Nem abrir o processo conseguimos: com certeza está fora do alcance.
+    if (!processo) return true;
+
+    token = [0];
+    if (!OpenProcessTokenFn(processo, TOKEN_QUERY_ACESSO, token)) return true;
+
+    // PERGUNTAMOS se o dono da janela está elevado, em vez de deduzir pela
+    // recusa de alguma chamada.
+    //
+    // A primeira versão disto deduzia: supunha que um processo comum não
+    // conseguiria LER o token de um elevado, e tratava a recusa como resposta.
+    // A suposição era falsa — com PROCESS_QUERY_LIMITED_INFORMATION o Windows
+    // deixa ler o token de um processo elevado sem reclamar. O teste contra uma
+    // janela do Editor do Registro mostrou isso: "token lido", e a detecção
+    // devolvia "pode clicar" justamente onde o clique não passa.
+    const buf = Buffer.alloc(4);
+    const usado: number[] = [0];
+    if (!GetTokenInformationFn(token[0], TOKEN_ELEVATION, buf, 4, usado)) return false;
+    return buf.readUInt32LE(0) !== 0;
+  } catch {
+    return false;
+  } finally {
+    try {
+      if (token[0]) CloseHandle(token[0]);
+      if (processo) CloseHandle(processo);
+    } catch {
+      /* fechar alça já fechada não é problema de ninguém */
+    }
   }
 }
 
