@@ -20,6 +20,7 @@ const api = {
         machineName: string;
         configPath: string;
         elevated: boolean;
+    processoElevado: boolean;
         abi: { ok: boolean; inputSize: number };
       }>,
   },

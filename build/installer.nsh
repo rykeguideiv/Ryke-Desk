@@ -49,6 +49,7 @@
   ; customInstall recria as tarefas (agora sem elevacao) no fim.
   nsExec::ExecToLog 'schtasks /Delete /TN "Ryke Desk" /F'
   nsExec::ExecToLog 'schtasks /Delete /TN "RykeDesk-Admin" /F'
+  nsExec::ExecToLog 'schtasks /Delete /TN "RykeDesk-Entrada" /F'
   ; Primeiro o pedido educado, para o aplicativo salvar o que precisa e
   ; soltar o gancho de teclado; depois a forca, so se ainda estiver vivo.
   nsExec::ExecToLog 'taskkill /IM "Ryke Desk.exe" /T'
@@ -129,6 +130,22 @@
   nsExec::ExecToLog 'schtasks /Create /TN "RykeDesk-Admin" /TR "\"$INSTDIR\${APP_EXECUTABLE_FILENAME}\" --minimizado" /SC ONCE /ST 00:00 /RL HIGHEST /F'
 
   ; ───────────────────────────────────────────────────────────────────
+  ; O AJUDANTE DE ENTRADA — o que torna o modo administrador indolor.
+  ;
+  ; Reabrir o programa inteiro elevado custava caro demais: elevado, o Chromium
+  ; não consegue iniciar a captura de tela e a imagem cai de 60 quadros para 1;
+  ; além disso a sessão caía no reinício e era preciso autorizar tudo de novo.
+  ;
+  ; Só a INJEÇÃO de mouse e teclado precisa de privilégio — a captura não. Esta
+  ; tarefa sobe um ajudante elevado que não desenha nem captura nada, apenas
+  ; injeta. Com ele, o aplicativo NUNCA eleva: a imagem continua rápida, a
+  ; conexão não cai e ninguém precisa autorizar outra vez.
+  ;
+  ; RL HIGHEST pelo mesmo motivo da tarefa acima: numa sessão remota o UAC
+  ; apareceria na área protegida, invisível para quem está controlando.
+  nsExec::ExecToLog 'schtasks /Create /TN "RykeDesk-Entrada" /TR "\"$INSTDIR\${APP_EXECUTABLE_FILENAME}\" --ajudante-entrada" /SC ONCE /ST 00:00 /RL HIGHEST /F'
+
+  ; ───────────────────────────────────────────────────────────────────
   ; LIBERAR NO FIREWALL — o que abre o caminho DIRETO entre os dois PCs.
   ;
   ; Num Windows recém-instalado o firewall bloqueia toda conexão de ENTRADA
@@ -163,6 +180,7 @@
 !macro customUnInstall
   nsExec::ExecToLog 'schtasks /Delete /TN "Ryke Desk" /F'
   nsExec::ExecToLog 'schtasks /Delete /TN "RykeDesk-Admin" /F'
+  nsExec::ExecToLog 'schtasks /Delete /TN "RykeDesk-Entrada" /F'
   nsExec::ExecToLog 'schtasks /Delete /TN "RykeDesk-SAS" /F'
   ; Tira a regra de firewall que abrimos na instalação — sem deixar rastro.
   nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Ryke Desk"'

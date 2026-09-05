@@ -801,7 +801,11 @@ function BotaoModoAdmin(): React.JSX.Element | null {
   if (confirmando) {
     return (
       <span className="modo-confirma">
-        <span>{elevated ? 'Voltar ao modo rápido?' : 'Entrar no admin? A imagem fica lenta.'} O app reabre sozinho.</span>
+        <span>
+          {elevated
+            ? 'Desligar o modo administrador?'
+            : 'Ligar o modo administrador? A imagem continua rápida e nada reabre.'}
+        </span>
         <button className="btn sm" onClick={agir}>Sim</button>
         <button className="btn ghost sm" onClick={() => setConfirmando(false)}>Não</button>
       </span>
@@ -814,8 +818,8 @@ function BotaoModoAdmin(): React.JSX.Element | null {
       onClick={() => setConfirmando(true)}
       title={
         elevated
-          ? 'Você está em MODO ADMINISTRADOR (imagem mais lenta). Clique para voltar ao modo rápido.'
-          : 'Entrar no modo administrador para instalar programas no PC remoto. A imagem fica lenta enquanto durar; use e volte.'
+          ? 'MODO ADMINISTRADOR ligado: dá para clicar em janelas de administrador. Clique para desligar.'
+          : 'Liga o modo administrador, para instalar programas e clicar em janelas que pedem administrador. A imagem continua rápida — o programa não reabre.'
       }
     >
       <IconShield />

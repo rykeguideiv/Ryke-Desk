@@ -30,7 +30,8 @@ import {
   SCRYPT_PARAMS,
   type ScryptParams,
 } from './auth';
-import * as input from './input';
+import * as input from './entrada';
+import { rodarComoAjudante, abrirCanoDoAjudante, fecharCanoDoAjudante, ajudanteConectado } from './ajudante';
 import * as tecladoGlobal from './teclado-global';
 import { definirPoliticaSas, enviarSas, estadoSas, dispararComoSistema } from './sas';
 import { listDisplays, findDisplay, toPhysicalPoint, toFraction } from './screen';
@@ -54,6 +55,27 @@ import {
 if (process.argv.includes('--sas')) {
   dispararComoSistema();
   process.exit(0);
+}
+
+/**
+ * Lançado ELEVADO pela tarefa agendada, só para injetar mouse e teclado.
+ *
+ * É o "Modo administrador" novo. Antes, entrar em modo administrador reabria o
+ * Ryke Desk INTEIRO elevado — e elevado o Chromium não consegue iniciar a
+ * captura de tela, então a imagem despencava de 60 quadros para 1, a sessão
+ * caía no reinício e ainda era preciso autorizar de novo. Três estragos para
+ * resolver uma coisa só.
+ *
+ * A observação que desfaz o nó: só a INJEÇÃO precisa de privilégio; a captura
+ * não. Então o aplicativo nunca mais eleva, e quem eleva é este ajudante — que
+ * não desenha nada, não captura nada e não entra na malha. Ver `ajudante.ts`.
+ *
+ * Esta cópia não pega a trava de instância nem monta interface: as duas coisas
+ * ficam guardadas por `EH_AJUDANTE` mais abaixo.
+ */
+const EH_AJUDANTE = process.argv.includes('--ajudante-entrada');
+if (EH_AJUDANTE) {
+  rodarComoAjudante(app.getPath('userData'));
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -127,7 +149,10 @@ app.commandLine.appendSwitch('disable-gpu-sandbox');
 // e, com isso, jogar toda a codificação de volta no processador.
 
 // Duas cópias abertas disputariam o mesmo número Ryke na malha.
-if (!app.requestSingleInstanceLock()) {
+// O ajudante é a exceção: ele não é uma cópia do programa, é um satélite sem
+// janela e sem número Ryke. Pegar a trava faria ele MATAR o aplicativo que
+// acabou de chamá-lo.
+if (!EH_AJUDANTE && !app.requestSingleInstanceLock()) {
   app.quit();
   process.exit(0);
 }
@@ -828,79 +853,92 @@ function lancar(programa: string, argumentos: string[], pronto: (ok: boolean) =>
   }
 }
 
-function trocarModo(elevado: boolean): void {
-  // COMO A NOVA CÓPIA SOBE — e por que ela sobrevive a este processo morrer.
-  //
-  // Quem a levanta é o AGENDADOR DE TAREFAS (elevar) ou o EXPLORER (voltar ao
-  // normal). Nenhum dos dois é filho deste app: a cópia nova nasce filha de um
-  // serviço do Windows, então continua de pé depois que saímos. Só precisamos
-  // manter este processo vivo pelo instante em que o pedido é feito — menos de
-  // um segundo — e por isso NÃO há espera nenhuma antes dele (uma espera dentro
-  // de um processo-filho morre junto com o app, que foi o defeito anterior).
-  encerrando = true;
-  const windir = process.env.WINDIR ?? 'C:\Windows';
-  const system32 = join(windir, 'System32');
-  const exe = process.execPath;
-
-  registrarDiag(`[modo] troca solicitada -> ${elevado ? 'ELEVADO' : 'normal'}`);
-
-  // Quem já está conectado agora não vai precisar ser autorizado outra vez
-  // quando o programa voltar. Ver o passe de retorno, acima.
-  salvarPasseDeRetorno([...ponteiros.keys()]);
-
-  // Solta a trava de instância única AGORA (síncrono), antes de a nova cópia
-  // nascer. Assim, quando ela chamar requestSingleInstanceLock, a trava já está
-  // livre e ela sobe — em vez de desistir na hora e o app "não reabrir".
-  try {
-    app.releaseSingleInstanceLock();
-  } catch {
-    /* a rede de segurança abaixo ainda encerra o processo */
-  }
-
-  let saiu = false;
-  const encerrar = (): void => {
-    if (saiu) return;
-    saiu = true;
-    try {
-      app.exit(0);
-    } catch {
-      /* já saiu */
-    }
-  };
-  // Uma folga antes de sair: dá tempo de a cópia nova nascer e pegar a trava
-  // enquanto esta ainda está viva, o que torna a troca contínua.
-  const sairEmSeguida = (): void => {
-    setTimeout(encerrar, 600);
-  };
-
-  if (!elevado) {
-    // Lançar PELO explorer devolve o app ao nível normal do usuário (des-eleva),
-    // que é onde a captura por hardware funciona. Ver a descoberta da lentidão.
-    lancar(join(windir, 'explorer.exe'), [exe], sairEmSeguida);
-  } else {
-    // Elevado e SEM UAC: dispara a tarefa RL HIGHEST criada pelo instalador —
-    // numa sessão remota o UAC apareceria na área de trabalho segura, invisível
-    // para quem controla.
-    lancar(join(system32, 'schtasks.exe'), ['/Run', '/TN', 'RykeDesk-Admin'], (ok) => {
-      if (ok) {
-        sairEmSeguida();
-        return;
+/**
+ * Espera o ajudante conectar no cano, ou desiste.
+ *
+ * Ele sobe por um serviço do Windows, então leva um instante. Desistir depois
+ * de um tempo importa: sem isso a interface diria "modo administrador ligado"
+ * enquanto nada estaria escutando, e cada clique do visitante cairia no vazio
+ * sem explicação nenhuma.
+ */
+function esperarAjudante(limiteMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const comecou = Date.now();
+    const relogio = setInterval(() => {
+      if (ajudanteConectado()) {
+        clearInterval(relogio);
+        resolve(true);
+      } else if (Date.now() - comecou >= limiteMs) {
+        clearInterval(relogio);
+        resolve(false);
       }
-      // A tarefa faltou ou falhou (instalação antiga, tarefa apagada à mão).
-      // O UAC é pior que nenhum prompt, mas garante que o app REABRE em vez de
-      // sumir — que é o defeito que não podemos deixar acontecer de novo.
-      registrarDiag('[modo] a tarefa falhou; caindo para o UAC');
-      lancar(
-        join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-        ['-NoProfile', '-NonInteractive', '-Command', `Start-Process -FilePath '${exe.replace(/'/g, "''")}' -Verb RunAs`],
-        sairEmSeguida,
-      );
-    });
+    }, 100);
+  });
+}
+
+/**
+ * Liga ou desliga o MODO ADMINISTRADOR — e agora SEM reiniciar nada.
+ *
+ * O QUE MUDOU, E POR QUE
+ *
+ * Antes isto reabria o Ryke Desk inteiro elevado. Custava três coisas de uma
+ * vez: a captura do Chromium não inicia em processo elevado (NotReadableError)
+ * e a imagem caía de 60 quadros para 1; a sessão caía junto com o reinício; e
+ * numa conexão sem senha salva era preciso autorizar tudo de novo.
+ *
+ * A observação que desfaz o nó: só a INJEÇÃO de mouse e teclado precisa de
+ * privilégio — a captura não. Então o aplicativo nunca mais eleva, e quem eleva
+ * é um ajudante que não desenha nem captura nada (ver `ajudante.ts`).
+ *
+ * O resultado é que ligar o modo administrador deixou de ter preço: a imagem
+ * continua em 60 quadros, a conexão não cai e ninguém precisa autorizar de
+ * novo, porque não há reinício nenhum.
+ */
+async function trocarModo(ligar: boolean): Promise<{ ok: boolean; mensagem: string }> {
+  const pastaDados = app.getPath('userData');
+
+  if (!ligar) {
+    // Fechar o cano basta: o ajudante morre sozinho quando ele cai, e antes de
+    // morrer solta o que estiver preso. Um processo elevado órfão injetando
+    // teclado é exatamente o que não pode sobrar.
+    fecharCanoDoAjudante(pastaDados);
+    registrarDiag('[modo] administrador DESLIGADO — o ajudante foi dispensado');
+    return { ok: true, mensagem: 'Modo administrador desligado.' };
   }
 
-  // Rede de segurança: se nenhum retorno vier, saímos mesmo assim para não
-  // ficar num limbo com a janela fechada e o processo vivo.
-  setTimeout(encerrar, 10000);
+  if (ajudanteConectado()) {
+    return { ok: true, mensagem: 'O modo administrador já estava ligado.' };
+  }
+
+  registrarDiag('[modo] ligando o administrador (ajudante elevado, sem reiniciar)');
+  abrirCanoDoAjudante(pastaDados, registrarDiag);
+
+  const windir = process.env.WINDIR ?? 'C:\\Windows';
+  const disparou = await new Promise<boolean>((resolve) => {
+    // A tarefa RL HIGHEST criada pelo instalador sobe o ajudante SEM UAC —
+    // essencial numa sessão remota, onde o UAC apareceria na área protegida,
+    // invisível para quem está controlando.
+    lancar(join(windir, 'System32', 'schtasks.exe'), ['/Run', '/TN', 'RykeDesk-Entrada'], resolve);
+  });
+
+  if (!disparou) {
+    fecharCanoDoAjudante(pastaDados);
+    registrarDiag('[modo] a tarefa RykeDesk-Entrada não subiu');
+    return {
+      ok: false,
+      mensagem:
+        'Não consegui subir o ajudante de administrador. Se o Ryke Desk foi atualizado de uma versão antiga, reinstale para criar a tarefa que falta.',
+    };
+  }
+
+  if (!(await esperarAjudante(8000))) {
+    fecharCanoDoAjudante(pastaDados);
+    registrarDiag('[modo] o ajudante subiu mas não conectou no cano');
+    return { ok: false, mensagem: 'O ajudante não respondeu. O modo administrador continua desligado.' };
+  }
+
+  registrarDiag('[modo] administrador LIGADO — sessão intacta, captura segue por hardware');
+  return { ok: true, mensagem: 'Modo administrador ligado. A imagem continua rápida e a conexão não caiu.' };
 }
 
 /**
@@ -1289,7 +1327,15 @@ function registerIpc(): void {
     version: app.getVersion(),
     machineName: process.env.COMPUTERNAME ?? 'PC',
     configPath: store.path,
-    elevated: isElevated(),
+    // "elevated" aqui quer dizer MODO ADMINISTRADOR LIGADO, e não "este
+    // processo está elevado" — os dois deixaram de ser a mesma coisa. O
+    // aplicativo nunca mais eleva; quem eleva é o ajudante. É o estado deste
+    // que o botão da interface reflete.
+    elevated: ajudanteConectado(),
+    // O processo em si. Deveria ser sempre falso: se aparecer verdadeiro,
+    // alguém abriu o Ryke Desk como administrador na mão — e aí a captura cai
+    // para 1 quadro por segundo. Vale saber, para o diagnóstico não mentir.
+    processoElevado: isElevated(),
     abi: input.verifyAbi(),
   }));
 
@@ -1991,6 +2037,9 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(async () => {
+  // O ajudante só ouve o cano: nada de janela, bandeja, malha ou captura.
+  if (EH_AJUDANTE) return;
+
   store = new Store();
   transfers = new Transfers(store.getSettings().downloadDir);
 
@@ -2129,6 +2178,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   encerrando = true;
+  // Quem está conectado agora não precisará ser autorizado de novo se o
+  // programa voltar em seguida — numa atualização, por exemplo. Vale dois
+  // minutos e é gasto na primeira usada. Ver o passe de retorno.
+  salvarPasseDeRetorno([...ponteiros.keys()]);
   tray?.destroy();
   tray = null;
   // Deixar um Ctrl preso ou o teclado bloqueado seria um desastre para o dono

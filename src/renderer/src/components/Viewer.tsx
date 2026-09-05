@@ -1711,14 +1711,19 @@ function Toolbar({
       </button>
 
       {/* Modo administrador do PC REMOTO: para instalar programas ou mexer em
-          janelas de admin lá. Trocar reabre o anfitrião (a sessão cai e volta) e,
-          enquanto elevado, a imagem fica lenta — por isso confirma antes. */}
+          janelas de admin lá.
+
+          Isto JÁ NÃO reabre o anfitrião nem derruba a sessão. Quem eleva agora é
+          um ajudante separado, que só injeta mouse e teclado — o aplicativo
+          continua no nível normal, onde a captura funciona a 60 quadros. A
+          confirmação fica porque é uma mudança de privilégio na máquina de outra
+          pessoa, não porque custe desempenho. */}
       {confirmAdmin ? (
         <span className="modo-confirma-barra">
           <span>
             {hostElevado
-              ? 'Voltar ao modo rápido no PC remoto?'
-              : 'Entrar no admin? A imagem fica lenta e a sessão reabre.'}
+              ? 'Desligar o modo administrador no PC remoto?'
+              : 'Ligar o modo administrador no PC remoto? A sessão não cai.'}
           </span>
           <button
             className="tool on"
@@ -1739,8 +1744,8 @@ function Toolbar({
           onClick={() => setConfirmAdmin(true)}
           title={
             hostElevado
-              ? 'O PC remoto está em MODO ADMINISTRADOR (imagem mais lenta). Clique para voltar ao modo rápido.'
-              : 'Coloca o PC remoto em modo administrador para instalar programas nele. A imagem fica lenta enquanto durar, e a sessão reabre — use e volte.'
+              ? 'O PC remoto está em MODO ADMINISTRADOR: dá para clicar em janelas que pedem administrador. Clique para desligar.'
+              : 'Coloca o PC remoto em modo administrador, para instalar programas e clicar em janelas de administrador. A imagem continua rápida e a sessão não cai.'
           }
         >
           <IconLock />
