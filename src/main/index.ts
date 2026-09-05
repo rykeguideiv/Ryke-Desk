@@ -47,6 +47,7 @@ import {
   esperaDevolucaoMs as calcularEsperaDevolucao,
   GRACA_INJECAO_MS,
 } from '../shared/emprestimo-cursor';
+import { ajustarBotoes, estaAtrasada } from '../shared/gesto-mouse';
 
 // Lançado como SISTEMA por uma tarefa agendada, só para disparar o
 // Ctrl+Alt+Del (ver `enviarSas` em sas.ts). Faz a única coisa que precisa e sai
@@ -680,6 +681,68 @@ function devolverCursor(peerId: string, agora: boolean): void {
 
 function segurandoBotao(peerId: string): boolean {
   return (botoesSegurados.get(peerId)?.size ?? 0) > 0;
+}
+
+// ── remontando o gesto: mensagens fora de ordem ───────────────────
+//
+// O porquê inteiro está em `shared/gesto-mouse.ts`. Aqui só o estado por
+// visitante e a ponte com a injeção.
+
+/** O maior contador já visto de cada visitante. */
+const ultimoContador = new Map<string, number>();
+
+/**
+ * Já tratamos algo mais novo do que isto? Então esta ficou para trás.
+ *
+ * CUIDADO AO MEXER: este descarte só é seguro porque `conciliarBotoes` existe.
+ * Sozinho ele PIORA as coisas — foi medido: com o "apertar" atrasado e a
+ * conciliação desligada, o descarte joga fora o apertar que chegou tarde e o
+ * arrasto não acontece de jeito nenhum (zero movimentos com botão). Os dois são
+ * um mecanismo só: um ignora o passado, o outro reconstrói o presente.
+ */
+function mensagemAtrasada(peerId: string, n?: number): boolean {
+  if (estaAtrasada(n, ultimoContador.get(peerId) ?? -1)) return true;
+  if (typeof n === 'number') ultimoContador.set(peerId, n);
+  return false;
+}
+
+/** Um conjunto de botões por visitante, criando-o na primeira vez. */
+function botoesDe(peerId: string): Set<number> {
+  let s = botoesSegurados.get(peerId);
+  if (!s) {
+    s = new Set();
+    botoesSegurados.set(peerId, s);
+  }
+  return s;
+}
+
+/**
+ * Faz o que temos apertado aqui virar o que o visitante diz estar apertado.
+ *
+ * Chamado a cada movimento. Na esmagadora maioria das vezes não há nada a
+ * fazer — os dois já concordam. Quando discordam, é porque uma mensagem se
+ * perdeu ou está atrasada, e é aqui que o gesto se conserta sozinho em vez de
+ * ser jogado fora.
+ */
+function conciliarBotoes(peerId: string, mascara: number, ponto: { x: number; y: number }): void {
+  const segurados = botoesDe(peerId);
+  const { pressionar, soltar } = ajustarBotoes(segurados, mascara);
+  if (pressionar.length === 0 && soltar.length === 0) return;
+
+  for (const botao of pressionar) {
+    // Leva o cursor antes: o Windows entrega o clique a quem estiver embaixo
+    // dele, e este "apertar" é o começo de um arrasto que perdeu o seu.
+    pegarCursorEmprestado(peerId, ponto);
+    segurados.add(botao);
+    input.mouseButton(botao as BotaoMouse, true);
+    registrarDiag(`[arrasto] o "apertar" do botão ${botao} não tinha chegado — recuperado pelo movimento`);
+  }
+  for (const botao of soltar) {
+    segurados.delete(botao);
+    input.mouseButton(botao as BotaoMouse, false);
+    registrarDiag(`[arrasto] o "soltar" do botão ${botao} se perdeu — solto pelo movimento`);
+  }
+  if (segurados.size === 0) devolverCursor(peerId, false);
 }
 
 // ── o Modo Gamer, do lado do anfitrião ──
@@ -1628,13 +1691,21 @@ function registerIpc(): void {
    * um botão, o cursor real vai junto, porque soltar o ponteiro no meio de um
    * arrasto não arrasta coisa nenhuma.
    */
-  ipcMain.on('input:move', (_e, peerId: string, fx: number, fy: number) => {
+  ipcMain.on('input:move', (_e, peerId: string, fx: number, fy: number, botoes?: number, n?: number) => {
     const point = toPhysicalPoint(captureDisplayId, fx, fy);
     if (!setasIndependentes()) {
       input.moveMouseTo(point.x, point.y);
       return;
     }
+    // Chegou atrasada? Então é de um instante que já passou, e obedecê-la
+    // puxaria o arrasto de volta. Ver shared/gesto-mouse.ts.
+    if (mensagemAtrasada(peerId, n)) return;
     registrarPonteiro(peerId, fx, fy);
+    // A máscara conta o que estava apertado quando este movimento saiu. Se ela
+    // discorda do que temos aqui, quem está errado somos nós: ou o "apertar"
+    // ainda não chegou, ou o "soltar" se perdeu. Acertar antes de mover é o que
+    // faz o arrasto sobreviver a uma mensagem fora de ordem.
+    if (typeof botoes === 'number') conciliarBotoes(peerId, botoes, point);
     if (segurandoBotao(peerId)) moverCursorReal(point);
   });
 
@@ -1661,7 +1732,7 @@ function registerIpc(): void {
    * clicar num lugar sem estar nele. Então levamos o cursor até a seta virtual,
    * clicamos, e no soltar do último botão ele volta para onde estava.
    */
-  ipcMain.on('input:button', (_e, peerId: string, button: BotaoMouse, down: boolean, fx: number, fy: number) => {
+  ipcMain.on('input:button', (_e, peerId: string, button: BotaoMouse, down: boolean, fx: number, fy: number, n?: number) => {
     // Move antes de clicar: um pacote de movimento perdido não pode fazer o
     // clique cair no lugar errado.
     const point = toPhysicalPoint(captureDisplayId, fx, fy);
@@ -1683,12 +1754,13 @@ function registerIpc(): void {
       return;
     }
 
+    // Um "apertar" ou "soltar" atrasado é pior do que perdido: o movimento que
+    // vem depois já conciliou o estado, e obedecer a uma ordem velha desfaria
+    // justamente o conserto. Ver `conciliarBotoes` e shared/gesto-mouse.ts.
+    if (mensagemAtrasada(peerId, n)) return;
+
     registrarPonteiro(peerId, fx, fy);
-    let segurados = botoesSegurados.get(peerId);
-    if (!segurados) {
-      segurados = new Set();
-      botoesSegurados.set(peerId, segurados);
-    }
+    const segurados = botoesDe(peerId);
 
     if (down) {
       segurados.add(button);

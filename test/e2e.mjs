@@ -42,6 +42,14 @@ const GetAsyncKeyState = user32.func('int16 __stdcall GetAsyncKeyState(int vKey)
 // medida com que o anfitrião converte a posição do cursor em fração.
 const GetSystemMetrics = user32.func('int __stdcall GetSystemMetrics(int nIndex)');
 
+// A janela-alvo do teste de arrasto. Ver test/arrasto/alvo-arrasto.cpp: quem
+// diz se houve arrasto é a janela que recebeu os eventos, não o cursor.
+koffi.struct('RECT_E2E', { left: 'long', top: 'long', right: 'long', bottom: 'long' });
+const FindWindowA = user32.func('intptr __stdcall FindWindowA(const char *cls, const char *titulo)');
+const GetClientRect = user32.func('int __stdcall GetClientRect(intptr h, _Out_ RECT_E2E *r)');
+const ClientToScreen = user32.func('int __stdcall ClientToScreen(intptr h, _Inout_ POINT *p)');
+const PostMessageA = user32.func('int __stdcall PostMessageA(intptr h, uint32 m, uintptr w, intptr l)');
+
 // Área de transferência de arquivos: o teste põe um arquivo nela como faria um
 // Ctrl+C no Explorador, e depois lê o que o outro lado deixou lá.
 const OpenClipboard = user32.func('int __stdcall OpenClipboard(void *hWnd)');
@@ -945,6 +953,166 @@ async function principal() {
     }
 
     await oCliqueEmprestaEDevolve(0.25, 0.75);
+
+    // ── 7b. arrastar: o gesto que precisa dos três na ordem certa ──
+    //
+    // Apertar e soltar no mesmo ponto é um CLIQUE, e o clique já funcionava.
+    // Arrastar é outra coisa: exige que o apertar chegue primeiro, que os
+    // movimentos do meio cheguem DEPOIS dele, e que o soltar venha por último.
+    // Se um movimento passar na frente do apertar, o anfitrião o descarta (não
+    // há botão segurado ainda) e o gesto vira um clique parado — que é
+    // exatamente o relato: "clico e arrasto e não acontece nada".
+    //
+    // Olhar o cursor não responde isso: o cursor se move de qualquer jeito.
+    // Quem sabe se houve arrasto é a JANELA que recebeu os eventos. Por isso
+    // existe test/arrasto/alvo-arrasto.exe: uma divisória igual à do VS Code,
+    // que só sai do lugar se a sequência inteira chegar inteira.
+    const ALVO_EXE = resolve(RAIZ, 'test/arrasto/alvo-arrasto.exe');
+    if (!existsSync(ALVO_EXE)) {
+      console.log('  --   arrasto: pulado, falta test/arrasto/alvo-arrasto.exe (rode test/arrasto/compilar.cmd)');
+    } else {
+      const LOG_ALVO = join(mkdtempSync(join(tmpdir(), 'ryke-arrasto-')), 'alvo.log');
+      const alvo = spawn(ALVO_EXE, [LOG_ALVO], { stdio: 'ignore' });
+      processos.push(alvo);
+
+      let hwndAlvo = 0;
+      for (let i = 0; i < 60 && !hwndAlvo; i++) {
+        hwndAlvo = FindWindowA('RykeAlvoArrasto', null);
+        if (!hwndAlvo) await dorme(100);
+      }
+
+      if (!hwndAlvo) {
+        check('a janela-alvo do arrasto abriu', false, 'RykeAlvoArrasto não apareceu em 6 s');
+      } else {
+        await dorme(400);
+        const rc = {};
+        GetClientRect(hwndAlvo, rc);
+        const canto = { x: 0, y: 0 };
+        ClientToScreen(hwndAlvo, canto);
+
+        /** Ponto do cliente da janela-alvo → fração da tela capturada. */
+        const fracaoDe = (cx, cy) => ({
+          x: (canto.x + cx) / (telaAnfitriao.width - 1),
+          y: (canto.y + cy) / (telaAnfitriao.height - 1),
+        });
+
+        const DIVISORIA = 350; // igual ao alvo-arrasto.cpp
+        const meioY = Math.round((rc.bottom - rc.top) / 2);
+
+        /**
+         * Atrasa, no visitante, só o "apertar" — e só ele.
+         *
+         * É a simulação de uma coisa que acontece toda hora na internet e
+         * NUNCA acontece aqui na mesa: `md` viaja pelo canal confiável, que
+         * retransmite quando um pacote se perde, enquanto `mm` viaja pelo canal
+         * rápido, que nunca espera por nada. São dois fluxos independentes: o
+         * apertar pode chegar depois de meia dúzia de movimentos que, no papel,
+         * vieram depois dele.
+         *
+         * Sem isto o teste roda num link perfeito e aprova um arrasto que
+         * quebra na casa do usuário.
+         *
+         * @param modo 'normal' · 'atrasar' (220 ms) · 'perder' (nunca chega)
+         */
+        async function mexerNoApertar(modo) {
+          await visitante.avaliar(`(() => {
+            const P = RTCDataChannel.prototype;
+            if (!P.__rykeOriginalSend) P.__rykeOriginalSend = P.send;
+            const orig = P.__rykeOriginalSend;
+            const modo = ${JSON.stringify(modo)};
+            P.send = function (d) {
+              if (modo !== 'normal' && typeof d === 'string' && d.includes('"md"')) {
+                if (modo === 'perder') return;
+                setTimeout(() => { try { orig.call(this, d); } catch {} }, 220);
+                return;
+              }
+              return orig.call(this, d);
+            };
+            return true;
+          })()`);
+        }
+
+        /**
+         * Um arrasto completo, e o que a janela-alvo diz que recebeu.
+         *
+         * `de` é onde a divisória está agora: a janela só aceita o arrasto se o
+         * apertar cair em cima dela (±12 px), igual à do VS Code.
+         */
+        async function arrastar(de, para) {
+          const marca = `-- arrasto ${de} -> ${para} --`;
+          const antes = existsSync(LOG_ALVO) ? readFileSync(LOG_ALVO, 'utf8').length : 0;
+          const inicio = fracaoDe(de, meioY);
+          SetCursorPos(ESTACIONA.x, ESTACIONA.y);
+          await dorme(300);
+          await eventoNoVideo('pointerdown', inicio.x, inicio.y, ', button: 0, buttons: 1');
+          // Passos pequenos e espaçados, como uma mão faz — e os PRIMEIROS bem
+          // pequenos, que é como um arrasto de verdade começa. Isto não é
+          // enfeite: a divisória só é agarrada dentro de ±12 px, então um
+          // primeiro passo largo faria o teste falhar por motivo errado
+          // justamente no caso em que o "apertar" precisa ser reconstruído a
+          // partir do primeiro movimento.
+          for (let i = 1; i <= 14; i++) {
+            const cx = de + Math.round((para - de) * (i / 14) ** 2);
+            const p = fracaoDe(cx, meioY);
+            await eventoNoVideo('pointermove', p.x, p.y, ', buttons: 1');
+            await dorme(24);
+          }
+          const fim = fracaoDe(para, meioY);
+          await dorme(250);
+          await eventoNoVideo('pointerup', fim.x, fim.y, ', button: 0, buttons: 0');
+          await dorme(500);
+          // Só o trecho DESTE arrasto: o registro é acumulado.
+          const texto = (existsSync(LOG_ALVO) ? readFileSync(LOG_ALVO, 'utf8') : '').slice(antes);
+          const linhas = texto.trim().split('\n');
+          const ultima = linhas.filter((l) => l.startsWith('MOVE') && l.includes('arrastando=1')).pop();
+          const divisoria = Number(/x=(-?\d+)/.exec(ultima ?? '')?.[1] ?? NaN);
+          const comBotao = linhas.filter((l) => l.startsWith('MOVE') && l.includes('botao=1')).length;
+          const semBotao = linhas.filter((l) => l.startsWith('MOVE') && l.includes('botao=0')).length;
+          return { marca, divisoria, comBotao, semBotao };
+        }
+
+        // ── caso 1: link saudável ──
+        const a1 = await arrastar(DIVISORIA, 520);
+        check(
+          'arrastar a divisória de 350 para 520 realmente a move',
+          Math.abs(a1.divisoria - 520) <= 25,
+          `divisória parou em ${a1.divisoria} · movimentos com botão ${a1.comBotao}, sem botão ${a1.semBotao}`,
+        );
+
+        // ── caso 2: o apertar chega atrasado, como na internet ──
+        await mexerNoApertar('atrasar');
+        const a2 = await arrastar(a1.divisoria, 180);
+        check(
+          'o arrasto sobrevive ao "apertar" chegando depois dos movimentos',
+          Math.abs(a2.divisoria - 180) <= 40,
+          `divisória parou em ${a2.divisoria}, esperado ~180 · movimentos com botão ${a2.comBotao}, sem botão ${a2.semBotao}`,
+        );
+
+        // ── caso 3: o apertar NÃO chega ──
+        //
+        // O pior caso, e o que o usuário descreveu: "clico e arrasto e não
+        // acontece nada". Antes, o anfitrião descartava todo movimento sem
+        // botão registrado e o gesto sumia inteiro. Agora cada movimento
+        // carrega a máscara do que está apertado, e o primeiro deles reconstrói
+        // o apertar que se perdeu. Ver shared/gesto-mouse.ts.
+        await mexerNoApertar('perder');
+        const a3 = await arrastar(a2.divisoria, 470);
+        await mexerNoApertar('normal');
+        check(
+          'o arrasto se reconstrói mesmo quando o "apertar" se perde de vez',
+          Math.abs(a3.divisoria - 470) <= 40,
+          `divisória parou em ${a3.divisoria}, esperado ~470 · movimentos com botão ${a3.comBotao}, sem botão ${a3.semBotao}`,
+        );
+
+        PostMessageA(hwndAlvo, 0x0010 /* WM_CLOSE */, 0, 0);
+        await dorme(300);
+      }
+      try {
+        alvo.kill();
+      } catch {
+        /* já saiu pelo WM_CLOSE */
+      }
+    }
 
     SetCursorPos(cursorOriginal.x, cursorOriginal.y);
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatId, formatBytes } from '../../../shared/protocol';
 import { COMBOS } from '../../../shared/keymap';
 import type { BotaoMouse } from '../../../shared/botoes';
+import { mascaraDe } from '../../../shared/gesto-mouse';
 import { pointerToFraction, wheelToTicks, type Fraction } from '../lib/geometry';
 import {
   corDoPonteiro,
@@ -353,6 +354,13 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     const soltarTudo = (): void => {
       for (const code of pressed.current) session.sendKey(code, false);
       pressed.current.clear();
+      // E os BOTÕES do mouse também. Apertar o botão e sair da janela — Alt+Tab
+      // no meio de um arrasto — nunca gerava o "soltar": o botão ficava
+      // apertado na máquina da outra pessoa, e ela via tudo ser selecionado e
+      // arrastado sem tocar em nada. É o mesmo motivo das teclas, e ficou de
+      // fora quando isto foi escrito.
+      for (const botao of segurando.current) session.sendMouseButton(botao, false, lastPoint.current.x, lastPoint.current.y);
+      segurando.current.clear();
     };
 
     const onKeyDown = (e: KeyboardEvent): void => {
@@ -738,6 +746,14 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
 
   /** Deslocamento acumulado do Modo Gamer, somado entre quadros. */
   const pendingRel = useRef({ dx: 0, dy: 0 });
+  /**
+   * Quais botões esta mão está segurando agora.
+   *
+   * Vai carimbado em cada movimento. É o que permite ao anfitrião saber que
+   * aquele movimento faz parte de um arrasto mesmo que o "apertar" ainda não
+   * tenha chegado — ver shared/gesto-mouse.ts.
+   */
+  const segurando = useRef(new Set<BotaoMouse>());
 
   const flushMove = useCallback(() => {
     rafId.current = null;
@@ -763,7 +779,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     }
     const point = pendingMove.current;
     pendingMove.current = null;
-    if (point) session.sendMouseMove(point.x, point.y);
+    if (point) session.sendMouseMove(point.x, point.y, mascaraDe(segurando.current));
   }, [session]);
 
   /**
@@ -858,6 +874,9 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
     }
     const point = pointerToFraction(video, e.clientX, e.clientY) ?? lastPoint.current;
     lastPoint.current = point;
+    // Anotado ANTES de enviar: o próximo movimento já sai carimbado como parte
+    // do gesto, mesmo que este "apertar" ainda esteja na fila da rede.
+    segurando.current.add(e.button as BotaoMouse);
     session.sendMouseButton(e.button as BotaoMouse, true, point.x, point.y);
   };
 
@@ -876,6 +895,7 @@ export function Viewer({ controller, state }: { controller: Controller; state: S
 
     if (video.hasPointerCapture(e.pointerId)) video.releasePointerCapture(e.pointerId);
     const point = pointerToFraction(video, e.clientX, e.clientY) ?? lastPoint.current;
+    segurando.current.delete(e.button as BotaoMouse);
     session.sendMouseButton(e.button as BotaoMouse, false, point.x, point.y);
   };
 

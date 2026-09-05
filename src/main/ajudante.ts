@@ -39,8 +39,16 @@ import { join } from 'node:path';
 
 import * as input from './input';
 
-/** O nome do cano. Fixo: só existe um ajudante por sessão de usuário. */
-const CANO = '\\\\.\\pipe\\ryke-desk-entrada';
+/**
+ * O nome do cano. Um por sessão de usuário — daí ser fixo.
+ *
+ * A variável de ambiente existe para o TESTE: sem ela, provar este caminho
+ * exigiria fechar o Ryke Desk que está aberto na máquina, porque dois donos do
+ * mesmo cano não cabem. O nome que vale em produção continua sendo este, e o
+ * ajudante nem consulta a variável: ele usa o nome que o aplicativo gravou no
+ * arquivo do segredo, junto com o segredo.
+ */
+const CANO = process.env.RYKE_CANO_ENTRADA || '\\\\.\\pipe\\ryke-desk-entrada';
 
 /** O que o ajudante sabe fazer. Nada além disto atravessa o cano. */
 export type Ordem =
@@ -171,7 +179,17 @@ export function fecharCanoDoAjudante(pastaDados: string): void {
 export function enviarAoAjudante(ordem: Ordem): boolean {
   if (!ajudanteConectado()) return false;
   try {
-    return ajudante!.write(`${JSON.stringify(ordem)}\n`);
+    // ATENÇÃO ao que NÃO devolvemos aqui: o resultado de `write`.
+    //
+    // `socket.write` devolve `false` quando o buffer de saída encheu — e isso
+    // NÃO quer dizer que a ordem falhou: ela foi aceita e sai assim que o cano
+    // vazar. Devolvendo aquele `false`, quem chama entendia "o ajudante não
+    // recebeu" e injetava de novo AQUI, localmente. A entrada acontecia duas
+    // vezes: um clique virava dois, um "soltar" virava dois. E o buffer só
+    // enche num momento — durante um arrasto, com sessenta mensagens por
+    // segundo, que é exatamente quando não pode falhar.
+    ajudante!.write(`${JSON.stringify(ordem)}\n`);
+    return true;
   } catch {
     return false;
   }

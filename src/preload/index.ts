@@ -188,9 +188,13 @@ const api = {
    * está segurando um botão e para quem o cursor real precisa voltar.
    */
   input: {
-    move: (peerId: string, fx: number, fy: number) => ipcRenderer.send('input:move', peerId, fx, fy),
-    button: (peerId: string, button: BotaoMouse, down: boolean, fx: number, fy: number) =>
-      ipcRenderer.send('input:button', peerId, button, down, fx, fy),
+    // `botoes` e `n`: a máscara do que está apertado e o contador da mensagem.
+    // São eles que deixam o anfitrião remontar um arrasto cujas mensagens
+    // chegaram fora de ordem — ver src/shared/gesto-mouse.ts.
+    move: (peerId: string, fx: number, fy: number, botoes?: number, n?: number) =>
+      ipcRenderer.send('input:move', peerId, fx, fy, botoes, n),
+    button: (peerId: string, button: BotaoMouse, down: boolean, fx: number, fy: number, n?: number) =>
+      ipcRenderer.send('input:button', peerId, button, down, fx, fy, n),
     // Modo Gamer: deslocamento relativo e clique sem reposicionar o cursor.
     moveRel: (peerId: string, dx: number, dy: number) => ipcRenderer.send('input:moveRel', peerId, dx, dy),
     /** Entrou/saiu do Modo Gamer: some com a seta e prende o ponteiro no centro. */

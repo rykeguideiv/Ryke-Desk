@@ -267,8 +267,24 @@ export type CtrlMeta = {
  * Enquanto o visitante estiver com um botão apertado — arrastando uma janela,
  * selecionando texto — o cursor real acompanha, porque um arrasto que solta o
  * ponteiro no meio do caminho não é um arrasto.
+ *
+ * OS DOIS CAMPOS QUE PARECEM DETALHE E SÃO O ARRASTO INTEIRO
+ *
+ * `b` é quais botões estão apertados AGORA (bits: 1 esquerdo · 2 meio ·
+ * 4 direito · 8 voltar · 16 avançar), e `n` é um contador que só cresce.
+ *
+ * Eles existem porque `mm` e `md`/`mu` viajam por canais DIFERENTES — um
+ * rápido e sem garantias, outro confiável e ordenado — e entre dois canais o
+ * WebRTC não promete ordem nenhuma. Sem `b`, um movimento que ultrapassasse o
+ * "apertar" era descartado pelo anfitrião (não havia botão segurado ainda) e o
+ * gesto virava um clique parado. Sem `n`, um movimento atrasado do canal
+ * rápido chegaria depois e puxaria o arrasto de volta para onde ele já não
+ * estava mais.
+ *
+ * Com os dois, o anfitrião consegue reconstruir o gesto a partir de qualquer
+ * mensagem: ela diz o que estava apertado e quando foi dita.
  */
-export type CtrlMouseMove = { t: 'mm'; x: number; y: number };
+export type CtrlMouseMove = { t: 'mm'; x: number; y: number; b?: number; n?: number };
 /**
  * Qual botão, na numeração do DOM: 0 esquerdo · 1 meio · 2 direito ·
  * 3 voltar · 4 avançar (os dois laterais, do polegar).
@@ -278,7 +294,8 @@ export type CtrlMouseMove = { t: 'mm'; x: number; y: number };
  * já que é copiado inteiro para o projeto do celular.
  */
 export type BotaoDoMouse = 0 | 1 | 2 | 3 | 4;
-export type CtrlMouseButton = { t: 'md' | 'mu'; b: BotaoDoMouse; x: number; y: number };
+/** `n`: o mesmo contador de `mm`, para o anfitrião pôr tudo em ordem. */
+export type CtrlMouseButton = { t: 'md' | 'mu'; b: BotaoDoMouse; x: number; y: number; n?: number };
 export type CtrlWheel = { t: 'wheel'; dx: number; dy: number; x: number; y: number };
 
 /**

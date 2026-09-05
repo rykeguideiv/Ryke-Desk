@@ -16,6 +16,7 @@ import type { BotaoMouse } from '../../../shared/botoes';
 import { maiorQualidade, PERFIS_CAPTURA_SOFTWARE } from '../../../shared/qualidade-captura';
 import { PERFIS_QUALIDADE, ALTURA_MAX_AUTO, escalaParaAltura } from '../../../shared/qualidade-video';
 import type { Ponteiro } from '../../../shared/ponteiros';
+import { movimentoPrecisaDeOrdem } from '../../../shared/gesto-mouse';
 
 /**
  * Uma sessão remota estabelecida, dos dois pontos de vista.
@@ -549,12 +550,14 @@ export class Session {
       case 'mm':
         // NÃO move o cursor do Windows daqui — move a seta virtual DESTE
         // visitante. Ver `input:move` no processo principal e o porquê inteiro
-        // em shared/ponteiros.ts.
-        window.ryke.input.move(this.peerId, msg.x, msg.y);
+        // em shared/ponteiros.ts. A máscara e o contador vão junto: são eles
+        // que deixam o anfitrião remontar um arrasto cujas mensagens chegaram
+        // fora de ordem. Ver shared/gesto-mouse.ts.
+        window.ryke.input.move(this.peerId, msg.x, msg.y, msg.b, msg.n);
         break;
       case 'md':
       case 'mu':
-        window.ryke.input.button(this.peerId, msg.b, msg.t === 'md', msg.x, msg.y);
+        window.ryke.input.button(this.peerId, msg.b, msg.t === 'md', msg.x, msg.y, msg.n);
         break;
       case 'mr':
         window.ryke.input.moveRel(this.peerId, msg.dx, msg.dy);
@@ -833,8 +836,26 @@ export class Session {
   // As duas mensagens de alta frequência, e as únicas que podem se perder sem
   // consequência: cada uma carrega a posição absoluta, então a próxima já
   // conserta o que a anterior não entregou.
-  sendMouseMove(x: number, y: number): void {
-    this.sendRapido({ t: 'mm', x, y });
+  /**
+   * Um número que só cresce, carimbado em todo movimento e todo clique.
+   *
+   * É o que deixa o anfitrião pôr em ordem mensagens que chegaram fora de
+   * ordem — e descartar a que ficou para trás. Ver `shared/gesto-mouse.ts`.
+   */
+  private contadorDeEntrada = 0;
+
+  /**
+   * @param botoes máscara do que está apertado agora (ver shared/gesto-mouse).
+   *
+   * Com botão apertado o movimento vira parte de um GESTO, e um gesto não pode
+   * ser remontado fora de ordem: ele vai pelo canal confiável, junto com o
+   * apertar e o soltar. Solto, continua no canal rápido, onde perder um quadro
+   * não custa nada porque a próxima posição já corrige.
+   */
+  sendMouseMove(x: number, y: number, botoes = 0): void {
+    const msg = { t: 'mm' as const, x, y, b: botoes, n: ++this.contadorDeEntrada };
+    if (movimentoPrecisaDeOrdem(botoes)) this.sendCtrl(msg);
+    else this.sendRapido(msg);
   }
   /** Anfitrião: conta ao visitante onde o cursor daqui está — e que forma tem. */
   sendCursor(x: number, y: number, tipo?: TipoCursor): void {
@@ -864,7 +885,7 @@ export class Session {
     this.sendRapido({ t: 'ponteiros', lista });
   }
   sendMouseButton(button: BotaoMouse, down: boolean, x: number, y: number): void {
-    this.sendCtrl({ t: down ? 'md' : 'mu', b: button, x, y });
+    this.sendCtrl({ t: down ? 'md' : 'mu', b: button, x, y, n: ++this.contadorDeEntrada });
   }
   /** Modo Gamer: deslocamento relativo da mira (canal rápido, pode perder). */
   sendMouseRel(dx: number, dy: number): void {
