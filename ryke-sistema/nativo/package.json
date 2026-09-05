@@ -1,0 +1,19 @@
+{
+  "name": "ryke-captura-nativa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Captura de tela pela Desktop Duplication API — o unico pedaco do Ryke Desk que exige compilador",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "build": "node-gyp rebuild",
+    "build:electron": "node build-electron.js",
+    "prova": "node prova.cjs"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.2.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^11.0.0"
+  }
+}

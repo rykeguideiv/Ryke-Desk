@@ -1,0 +1,9 @@
+# O que o compilador produz. É reconstruído pelo CI a cada versão, e um .node
+# tem alvo (Node x Electron), arquitetura e ABI — commitá-lo garante que uma
+# hora alguém use o binário errado sem perceber.
+build/
+node_modules/
+
+# A janela animada existe só para dar o que capturar durante a medida.
+# Não é parte do produto, mas fica versionada de propósito: sem ela a prova
+# mede uma tela parada e conclui, errado, que a captura não funciona.

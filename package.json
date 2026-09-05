@@ -51,7 +51,14 @@
     },
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/koffi/build/koffi/darwin_*/**",
+      "!**/node_modules/koffi/build/koffi/freebsd_*/**",
+      "!**/node_modules/koffi/build/koffi/linux_*/**",
+      "!**/node_modules/koffi/build/koffi/musl_*/**",
+      "!**/node_modules/koffi/build/koffi/openbsd_*/**",
+      "!**/node_modules/koffi/build/koffi/win32_arm64/**",
+      "!**/node_modules/koffi/build/koffi/win32_ia32/**"
     ],
     "extraResources": [
       {

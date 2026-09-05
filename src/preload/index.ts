@@ -45,6 +45,8 @@ const api = {
   /** Grava uma linha no arquivo de diagnóstico (%APPDATA%/ryke-desk/ryke-diagnostico.log). */
   diag: {
     log: (linha: string) => ipcRenderer.send('diag:log', linha),
+    /** Abre o arquivo de log no Explorador — a saída que não depende da área de transferência. */
+    abrir: () => ipcRenderer.invoke('diag:abrir') as Promise<void>,
   },
 
   identity: {

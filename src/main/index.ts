@@ -1302,6 +1302,10 @@ function registerIpc(): void {
   // arquivo de diagnóstico. É como a causa da lentidão vira algo legível no
   // disco depois, em vez de sumir no console de um app empacotado.
   ipcMain.on('diag:log', (_e, linha: string) => registrarDiag(String(linha).slice(0, 2000)));
+  // Mostrar o arquivo no Explorador, em vez de abri-lo: assim a pessoa pode
+  // anexá-lo direto, que é o caminho que funciona quando a área de
+  // transferência não coopera.
+  ipcMain.handle('diag:abrir', () => shell.showItemInFolder(caminhoDiag()));
 
   // Trocar entre modo normal (rápido) e administrador (para instalar/mexer em
   // janelas de admin no PC remoto). Ver `trocarModo`.

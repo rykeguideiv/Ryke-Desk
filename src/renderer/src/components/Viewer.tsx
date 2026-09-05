@@ -1314,17 +1314,59 @@ function montarTextoDiagnostico(outgoing: Outgoing): string {
  * selecionável (com botão Copiar) para colar aqui. Nada de adivinhação.
  */
 function PainelDiagnostico({ outgoing, onClose }: { outgoing: Outgoing; onClose: () => void }): React.JSX.Element {
-  const [copiado, setCopiado] = useState(false);
+  const [copia, setCopia] = useState<'parado' | 'copiado' | 'falhou'>('parado');
+  const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const texto = montarTextoDiagnostico(outgoing);
   const usandoGpu = outgoing.meta?.hostCapturaSoftware !== true;
+
+  /**
+   * Copiar por TRÊS caminhos, e nunca falhar calado.
+   *
+   * A versão anterior tinha um só caminho — mandar o texto ao processo
+   * principal — e engolia qualquer erro num `catch` vazio. Quando não
+   * funcionava, o botão simplesmente não fazia nada: nem copiava, nem dizia que
+   * não tinha copiado. Um botão que falha em silêncio é pior do que um botão
+   * que não existe, porque a pessoa fica tentando.
+   *
+   * Agora tentamos primeiro o caminho do próprio navegador (selecionar e
+   * copiar), que não passa por IPC nenhum; depois a área de transferência do
+   * sistema pelo processo principal; e o que acontecer fica na cara do botão.
+   */
   const copiar = async (): Promise<void> => {
-    try {
-      await window.ryke.clipboard.write(texto);
-      setCopiado(true);
-      window.setTimeout(() => setCopiado(false), 1600);
-    } catch {
-      /* se o clipboard falhar, o usuário ainda pode selecionar à mão */
+    const tentativas: Array<() => Promise<boolean>> = [
+      // 1. Seleciona o texto e usa a cópia nativa do navegador.
+      async () => {
+        const area = areaRef.current;
+        if (!area) return false;
+        area.focus();
+        area.select();
+        return document.execCommand('copy');
+      },
+      // 2. A área de transferência do sistema, pelo processo principal.
+      async () => {
+        await window.ryke.clipboard.write(texto);
+        return true;
+      },
+      // 3. A API do navegador, que exige contexto seguro e pode não existir.
+      async () => {
+        await navigator.clipboard?.writeText(texto);
+        return true;
+      },
+    ];
+    for (const tentar of tentativas) {
+      try {
+        if (await tentar()) {
+          setCopia('copiado');
+          window.setTimeout(() => setCopia('parado'), 1600);
+          return;
+        }
+      } catch {
+        /* tenta o próximo caminho */
+      }
     }
+    // Nenhum funcionou: dizer isso é o mínimo, e o arquivo de log continua lá.
+    setCopia('falhou');
+    window.setTimeout(() => setCopia('parado'), 4000);
   };
   return (
     <div className="diag-painel" onPointerDown={(e) => e.stopPropagation()}>
@@ -1340,6 +1382,7 @@ function PainelDiagnostico({ outgoing, onClose }: { outgoing: Outgoing; onClose:
           : '✗ O vídeo NÃO está usando a placa — está indo pelo processador'}
       </div>
       <textarea
+        ref={areaRef}
         className="diag-texto"
         readOnly
         value={texto}
@@ -1348,9 +1391,18 @@ function PainelDiagnostico({ outgoing, onClose }: { outgoing: Outgoing; onClose:
       />
       <div className="diag-acoes">
         <button className="btn-diag" onClick={() => void copiar()}>
-          {copiado ? '✓ Copiado!' : 'Copiar tudo'}
+          {copia === 'copiado' ? '✓ Copiado!' : copia === 'falhou' ? '✗ Não consegui copiar' : 'Copiar tudo'}
         </button>
-        <span className="diag-dica">Selecione o texto e copie para colar aqui no Claude.</span>
+        {/* A saída que não depende da área de transferência: o relatório completo
+            está sempre gravado em arquivo, e daqui dá para chegar nele. */}
+        <button className="btn-diag" onClick={() => void window.ryke.diag.abrir()}>
+          Abrir o arquivo de log
+        </button>
+        <span className="diag-dica">
+          {copia === 'falhou'
+            ? 'A área de transferência recusou. Use "Abrir o arquivo de log" e mande o arquivo.'
+            : 'Copie e cole aqui no Claude — ou abra o arquivo de log, que tem o histórico completo.'}
+        </span>
       </div>
     </div>
   );

@@ -32,6 +32,31 @@
 #      sua organização no SignPath.
 #   3. Ajuste project-slug e signing-policy-slug abaixo para os nomes que o
 #      SignPath criar para o seu projeto.
+#   4. NA CONFIGURAÇÃO DE ARTEFATO DO SIGNPATH, mande assinar também os
+#      arquivos .node de DENTRO do instalador. Ver o porquê logo abaixo — este
+#      passo é fácil de esquecer e é o que decide se o programa funciona numa
+#      máquina nova.
+#
+# POR QUE ASSINAR SÓ O .EXE NÃO BASTA
+#
+#   O Windows avalia cada arquivo no momento em que o carrega, e não só o
+#   instalador. Os módulos nativos (.node) ficam desempacotados ao lado do
+#   executável, e o `electron-builder` NÃO os assina.
+#
+#   Num Windows 11 recém-instalado, com o Smart App Control ligado, um .node
+#   sem assinatura é BLOQUEADO. O `koffi` é a ponte para o SendInput: sem ele o
+#   acesso remoto conecta, mostra a tela e não responde a teclado nem mouse.
+#   Para quem instalou, isso parece problema de rede — não há nada no programa
+#   que aponte a causa.
+#
+#   Foi medido durante o desenvolvimento: com o Smart App Control ligado, o
+#   Windows bloqueia qualquer binário recém-compilado, até um "olá mundo" de
+#   três linhas. Não existe lista de exceções; é tudo ou nada.
+#
+#   O passo "Conferir a assinatura dos módulos nativos", mais abaixo, avisa
+#   quando isso está pendente. Depois que a assinatura estiver funcionando,
+#   defina EXIGIR_ASSINATURA=1 nesse passo para ele passar a FALHAR em vez de
+#   avisar — aí uma versão nesse estado não sai mais sem querer.
 #
 # Enquanto esses valores não existirem, a Release sai assim mesmo, com o
 # instalador NÃO assinado e um aviso dizendo isso. Antes este workflow não
@@ -69,8 +94,43 @@ jobs:
       - name: Conferir tipos e testes de unidade
         run: npm run typecheck && npm run test:unit
 
+      # ── a captura nativa (C++) ──────────────────────────────────────────
+      #
+      # É o único pedaço do projeto que precisa de compilador: a Desktop
+      # Duplication é COM sobre Direct3D 11, e isso não atravessa uma ponte
+      # FFI. O runner `windows-latest` já traz Build Tools, Windows SDK e
+      # Python, então aqui basta mandar compilar.
+      #
+      # Compilado contra o ABI do ELECTRON, e não o do Node: um módulo nativo
+      # construído para o Node não carrega dentro do Electron, e o erro que
+      # isso produz ("NODE_MODULE_VERSION ... requires ...") não diz de cara
+      # que a causa foi compilar para o alvo errado.
+      - name: Instalar dependências da captura nativa
+        working-directory: ryke-sistema/nativo
+        run: npm ci --ignore-scripts
+
+      - name: Compilar a captura nativa para o Electron
+        working-directory: ryke-sistema/nativo
+        run: npm run build:electron
+
+      - name: Guardar a captura nativa como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: ryke-captura-nativa
+          path: ryke-sistema/nativo/build/Release/*.node
+          if-no-files-found: error
+
       - name: Construir o instalador
         run: npm run dist
+
+      # Um aviso, não uma falha: enquanto o SignPath não estiver ligado, os
+      # `.node` saem sem assinatura — e num Windows 11 recém-instalado o Smart
+      # App Control os bloqueia, deixando a sessão sem teclado nem mouse. É o
+      # tipo de defeito que chega como "conecta mas não responde", sem pista
+      # nenhuma da causa, então ele precisa estar dito em algum lugar.
+      - name: Conferir a assinatura dos módulos nativos
+        shell: pwsh
+        run: node build/conferir-assinatura-nativos.js
 
       - name: Guardar o instalador não assinado como artefato
         id: subir
